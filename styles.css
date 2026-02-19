@@ -1,14 +1,16 @@
-/* Mobile-first random recipe app */
+/* Modern, clean recipe app */
 :root {
-  --bg: #f7f5f0;
-  --surface: #fff;
-  --primary: #2d5016;
-  --primary-light: #4a7c2a;
-  --accent: #c9a227;
-  --text: #1a1a1a;
-  --text-muted: #5c5c5c;
-  --radius: 12px;
-  --shadow: 0 2px 12px rgba(0,0,0,0.08);
+  --bg: #f8fafc;
+  --surface: #ffffff;
+  --border: #e2e8f0;
+  --text: #0f172a;
+  --text-muted: #64748b;
+  --accent: #0ea5e9;
+  --accent-hover: #0284c7;
+  --radius: 10px;
+  --radius-lg: 14px;
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.04);
+  --shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
   --safe-top: env(safe-area-inset-top);
   --safe-bottom: env(safe-area-inset-bottom);
 }
@@ -25,13 +27,14 @@ html {
 
 body {
   margin: 0;
-  font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+  font-family: "DM Sans", system-ui, -apple-system, sans-serif;
   background: var(--bg);
   color: var(--text);
   min-height: 100vh;
   min-height: 100dvh;
   padding: var(--safe-top) 0 var(--safe-bottom);
   overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
 }
 
 #app {
@@ -61,25 +64,27 @@ body {
 #home-view {
   justify-content: center;
   align-items: center;
-  padding: 24px;
+  padding: 32px 24px;
   text-align: center;
 }
 
 .header {
-  margin-bottom: 2rem;
+  margin-bottom: 2.5rem;
 }
 
 .header h1 {
   margin: 0 0 0.5rem;
   font-size: 1.75rem;
   font-weight: 700;
-  color: var(--primary);
+  color: var(--text);
+  letter-spacing: -0.02em;
 }
 
 .subtitle {
   margin: 0;
-  font-size: 1rem;
+  font-size: 0.9375rem;
   color: var(--text-muted);
+  font-weight: 500;
 }
 
 .pick-btn {
@@ -88,34 +93,40 @@ body {
   align-items: center;
   gap: 0.5rem;
   padding: 1.25rem 2rem;
-  font-size: 1.125rem;
+  font-size: 1rem;
   font-weight: 600;
   color: var(--surface);
-  background: linear-gradient(135deg, var(--primary) 0%, var(--primary-light) 100%);
+  background: var(--text);
   border: none;
-  border-radius: var(--radius);
-  box-shadow: var(--shadow);
+  border-radius: var(--radius-lg);
   cursor: pointer;
-  transition: transform 0.15s ease, box-shadow 0.15s ease;
+  transition: background 0.2s ease, transform 0.15s ease;
   -webkit-tap-highlight-color: transparent;
+  box-shadow: var(--shadow);
+}
+
+.pick-btn:hover {
+  background: #1e293b;
 }
 
 .pick-btn:active {
   transform: scale(0.98);
 }
 
-.pick-btn:hover {
-  box-shadow: 0 4px 20px rgba(45, 80, 22, 0.35);
+.pick-btn-icon {
+  font-size: 2rem;
+  line-height: 1;
+  opacity: 0.9;
 }
 
-.pick-btn-icon {
-  font-size: 2.5rem;
-  line-height: 1;
+.pick-btn-text {
+  letter-spacing: 0.01em;
 }
 
 /* Recipe view */
 #recipe-view {
   padding-bottom: 2rem;
+  background: var(--surface);
 }
 
 .recipe-header {
@@ -123,43 +134,50 @@ body {
   top: 0;
   z-index: 10;
   background: var(--surface);
-  padding: var(--safe-top) 16px 12px;
-  box-shadow: 0 1px 0 rgba(0,0,0,0.06);
+  padding: calc(var(--safe-top) + 20px) 20px 16px;
+  border-bottom: 1px solid var(--border);
 }
 
 .recipe-header-top {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 8px;
+  margin-bottom: 10px;
 }
 
 .back-btn {
   display: inline-flex;
   align-items: center;
-  padding: 6px 0;
+  padding: 8px 0;
   font-size: 0.9375rem;
-  color: var(--primary);
+  font-weight: 500;
+  color: var(--text-muted);
   background: none;
   border: none;
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
+  transition: color 0.15s ease;
+}
+
+.back-btn:hover {
+  color: var(--text);
 }
 
 .random-btn {
-  padding: 8px 14px;
+  padding: 8px 16px;
   font-size: 0.875rem;
   font-weight: 600;
   color: var(--surface);
-  background: linear-gradient(135deg, var(--primary) 0%, var(--primary-light) 100%);
+  background: var(--text);
   border: none;
   border-radius: var(--radius);
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
+  transition: background 0.2s ease;
 }
 
 .random-btn:hover {
-  opacity: 0.95;
+  background: #1e293b;
 }
 
 .random-btn:active {
@@ -172,12 +190,13 @@ body {
   font-weight: 700;
   color: var(--text);
   line-height: 1.3;
+  letter-spacing: -0.02em;
 }
 
 .recipe-hero {
   width: 100%;
   aspect-ratio: 4/3;
-  background: #e8e6e1;
+  background: var(--bg);
   overflow: hidden;
 }
 
@@ -189,119 +208,111 @@ body {
 }
 
 .recipe-content {
-  padding: 0 0 2rem;
+  padding: 24px 20px 32px;
 }
 
-/* Coloured section cards (reference UI) */
-.section-card {
-  margin: 0 16px 16px;
-  padding: 1.25rem 1.25rem 1.5rem;
-  border-radius: 16px;
-  color: #fff;
+/* Sections – clean cards */
+.section {
+  margin-bottom: 28px;
+  padding: 20px 0;
+  border-bottom: 1px solid var(--border);
 }
 
-.section-card:first-child {
-  margin-top: 20px;
+.section:last-child {
+  border-bottom: none;
+  margin-bottom: 0;
 }
 
-.section-card-title {
-  margin: 0 0 1rem;
-  font-size: 1.125rem;
-  font-weight: 700;
-  color: #fff;
+.section-title {
+  margin: 0 0 14px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-muted);
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.08em;
 }
 
-/* Card colours: red, green, blue, orange */
-.section-card--highlights {
-  background: #c0392b;
-}
-
-.section-card--ingredients {
-  background: #27ae60;
-}
-
-.section-card--instructions {
-  background: #2980b9;
-}
-
-.section-card--tips {
-  background: #d35400;
-}
-
-/* Highlights grid */
+/* Highlights – subtle pills */
 .highlights-grid {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .highlight-chip {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: 8px;
-  padding: 10px 12px;
-  background: rgba(255, 255, 255, 0.2);
+  gap: 6px;
+  padding: 8px 12px;
+  background: var(--bg);
+  border: 1px solid var(--border);
   border-radius: var(--radius);
-  font-size: 0.875rem;
-  color: #fff;
+  font-size: 0.8125rem;
+  color: var(--text);
 }
 
 .highlight-chip .icon {
-  font-size: 1.125rem;
+  font-size: 1rem;
+  opacity: 0.8;
 }
 
 .highlight-chip .label {
-  opacity: 0.9;
+  color: var(--text-muted);
+  font-weight: 500;
 }
 
 .highlight-chip .value {
   font-weight: 600;
+  color: var(--text);
 }
 
-/* Ingredients & tips on coloured cards */
-.section-card .ingredients-list,
-.section-card .tips-list {
+/* Ingredients & tips */
+.ingredients-list,
+.tips-list {
   margin: 0;
   padding-left: 1.25rem;
   font-size: 0.9375rem;
-  line-height: 1.6;
-  color: rgba(255, 255, 255, 0.95);
+  line-height: 1.7;
+  color: var(--text);
 }
 
 .ingredients-list li,
 .tips-list li {
-  margin-bottom: 0.35rem;
+  margin-bottom: 0.4rem;
+}
+
+.tips-list li {
+  color: var(--text-muted);
 }
 
 /* Step-by-step instructions */
 .step-container {
-  min-height: 120px;
+  min-height: 100px;
 }
 
-.section-card .step-text {
-  margin: 0 0 1rem;
-  font-size: 1.0625rem;
-  line-height: 1.55;
-  color: rgba(255, 255, 255, 0.95);
+.step-text {
+  margin: 0 0 16px;
+  font-size: 1rem;
+  line-height: 1.6;
+  color: var(--text);
 }
 
-.section-card .step-counter {
-  margin: 0 0 1rem;
+.step-counter {
+  margin: 0 0 14px;
   font-size: 0.8125rem;
-  color: rgba(255, 255, 255, 0.85);
+  color: var(--text-muted);
+  font-weight: 500;
 }
 
 .step-actions {
   display: flex;
-  gap: 12px;
+  gap: 10px;
   flex-wrap: wrap;
 }
 
 .step-btn {
   flex: 1;
-  min-width: 120px;
+  min-width: 100px;
   padding: 12px 16px;
   font-size: 0.9375rem;
   font-weight: 600;
@@ -309,24 +320,34 @@ body {
   border-radius: var(--radius);
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
+  transition: opacity 0.15s ease, background 0.15s ease;
 }
 
 .step-btn-prev {
-  background: rgba(255, 255, 255, 0.25);
-  color: #fff;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+}
+
+.step-btn-prev:hover:not(:disabled) {
+  background: #f1f5f9;
 }
 
 .step-btn-next {
-  background: rgba(255, 255, 255, 0.95);
-  color: #2980b9;
+  background: var(--text);
+  color: var(--surface);
+}
+
+.step-btn-next:hover:not(:disabled) {
+  background: #1e293b;
 }
 
 .step-btn:disabled {
-  opacity: 0.5;
+  opacity: 0.45;
   cursor: not-allowed;
 }
 
-/* Responsive tweaks for larger phones / small tablets */
+/* Responsive */
 @media (min-width: 380px) {
   .header h1 {
     font-size: 2rem;
@@ -335,24 +356,20 @@ body {
   .recipe-title {
     font-size: 1.5rem;
   }
-
-  .highlights-grid {
-    grid-template-columns: repeat(2, 1fr);
-  }
 }
 
 @media (min-width: 480px) {
   body {
-    padding-top: 16px;
+    padding-top: 20px;
   }
 
   #app {
     border-radius: 16px;
-    box-shadow: 0 8px 32px rgba(0,0,0,0.1);
+    box-shadow: var(--shadow);
     overflow: hidden;
   }
 
   .recipe-hero {
-    border-radius: 0;
+    border-radius: 16px 16px 0 0;
   }
 }
