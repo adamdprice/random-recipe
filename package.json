@@ -1,0 +1,15 @@
+{
+  "name": "random-recipe",
+  "version": "1.0.0",
+  "description": "Mobile web app – random recipe selector",
+  "private": true,
+  "scripts": {
+    "start": "serve . -p ${PORT:-3000}"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "serve": "^14.2.0"
+  }
+}

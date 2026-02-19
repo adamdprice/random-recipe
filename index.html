@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <meta name="theme-color" content="#2d5016" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <title>Random Recipe</title>
+  <link rel="stylesheet" href="styles.css" />
+  <link rel="preconnect" href="https://images.unsplash.com" crossorigin />
+</head>
+<body>
+  <div id="app">
+    <!-- Home: random recipe picker -->
+    <main id="home-view" class="view active">
+      <header class="header">
+        <h1>What’s for dinner?</h1>
+        <p class="subtitle">Tap below for a random recipe</p>
+      </header>
+      <button type="button" id="pick-recipe-btn" class="pick-btn" aria-label="Pick a random recipe">
+        <span class="pick-btn-icon">🍳</span>
+        <span class="pick-btn-text">Pick a recipe</span>
+      </button>
+    </main>
+
+    <!-- Recipe detail -->
+    <main id="recipe-view" class="view" hidden>
+      <header class="recipe-header">
+        <div class="recipe-header-top">
+          <button type="button" id="back-btn" class="back-btn" aria-label="Back to picker">← Back</button>
+          <button type="button" id="random-recipe-btn" class="random-btn" aria-label="Pick another random recipe">Random</button>
+        </div>
+        <h2 id="recipe-name" class="recipe-title"></h2>
+      </header>
+
+      <div class="recipe-hero">
+        <img id="recipe-image" src="" alt="" class="recipe-image" />
+      </div>
+
+      <div class="recipe-content">
+        <!-- Highlights -->
+        <section class="section-card section-card--highlights" aria-label="Recipe highlights">
+          <h3 class="section-card-title">Highlights</h3>
+          <div id="highlights-grid" class="highlights-grid"></div>
+        </section>
+
+        <!-- Ingredients -->
+        <section class="section-card section-card--ingredients" aria-label="Ingredients">
+          <h3 class="section-card-title">Ingredients</h3>
+          <ul id="ingredients-list" class="ingredients-list"></ul>
+        </section>
+
+        <!-- Cooking steps (step-by-step with Next) -->
+        <section class="section-card section-card--instructions" aria-label="Instructions">
+          <h3 class="section-card-title">Instructions</h3>
+          <div id="step-container" class="step-container">
+            <p id="step-text" class="step-text"></p>
+            <p id="step-counter" class="step-counter" aria-live="polite"></p>
+            <div class="step-actions">
+              <button type="button" id="prev-step-btn" class="step-btn step-btn-prev" aria-label="Previous step">Previous</button>
+              <button type="button" id="next-step-btn" class="step-btn step-btn-next" aria-label="Next step">Next</button>
+            </div>
+          </div>
+        </section>
+
+        <!-- Tips -->
+        <section class="section-card section-card--tips" aria-label="Tips">
+          <h3 class="section-card-title">Tips</h3>
+          <ul id="tips-list" class="tips-list"></ul>
+        </section>
+      </div>
+    </main>
+  </div>
+
+  <script src="recipes.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
