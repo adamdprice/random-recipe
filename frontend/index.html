@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Kinly Lead Distribution</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <header class="header">
+    <div class="header-left">
+      <h1>Lead Distribution</h1>
+      <span class="squiggle" aria-hidden="true"></span>
+      <p class="subtitle">Manage lead teams, staff availability, and distribution</p>
+    </div>
+    <div class="header-right">
+      <div class="header-hubspot-status" id="api-status-wrap" aria-live="polite">
+        <span class="hubspot-logo" aria-hidden="true">
+          <img src="/images/hubspot-logo.png" alt="HubSpot" width="24" height="24" />
+        </span>
+        <span class="hubspot-status-icon hubspot-status--check" id="api-status-ok" hidden aria-label="Connected">
+          <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M16.707 5.293a1 1 0 0 1 0 1.414l-8 8a1 1 0 0 1-1.414 0l-4-4a1 1 0 1 1 1.414-1.414L8 12.586l7.293-7.293a1 1 0 0 1 1.414 0z" fill="currentColor"/></svg>
+        </span>
+        <span class="hubspot-status-icon hubspot-status--cross" id="api-status-fail" hidden aria-label="Not connected">
+          <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M14.364 5.636a1 1 0 0 1 0 1.414L11.414 10l2.95 2.95a1 1 0 1 1-1.414 1.414L10 11.414l-2.95 2.95a1 1 0 1 1-1.414-1.414L8.586 10 5.636 7.05a1 1 0 0 1 1.414-1.414L10 8.586l2.95-2.95a1 1 0 0 1 1.414 0z" fill="currentColor"/></svg>
+        </span>
+        <span class="hubspot-status-icon hubspot-status--loading" id="api-status-loading" aria-label="Checking…">
+          <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" class="spin"><circle cx="10" cy="10" r="7" stroke="currentColor" stroke-width="2" stroke-dasharray="32" stroke-linecap="round" fill="none"/></svg>
+        </span>
+      </div>
+      <nav class="header-nav" aria-label="Main">
+        <button type="button" class="tab active" data-tab="staff-mgmt">Staff Management</button>
+        <button type="button" class="tab" data-tab="call-activity">Call activity</button>
+        <button type="button" class="tab" data-tab="team-mgmt">Team Management</button>
+        <button type="button" class="tab" data-tab="dryrun">Test run</button>
+        <button type="button" class="tab" data-tab="data">Data</button>
+      </nav>
+      <p class="header-actions"><a href="#" id="sign-out" class="tab-link">Sign out</a></p>
+    </div>
+  </header>
+
+  <main class="main">
+    <div class="page-logo">
+      <img src="/images/kinly-logo.png" alt="Kinly" class="page-logo-img" width="360" height="104" />
+    </div>
+
+    <section id="staff-mgmt" class="panel active">
+      <div class="card section" id="unallocated-gauges-section">
+        <div class="section-head">
+          <h2>Unallocated leads</h2>
+          <span class="squiggle" aria-hidden="true"></span>
+        </div>
+        <p class="hint">Unallocated contacts per team. 200+ is maximum (red).</p>
+        <div id="unallocated-gauges-loading" class="loading">Loading…</div>
+        <div id="unallocated-gauges-error" class="error" hidden></div>
+        <div id="unallocated-gauges" class="unallocated-gauges" hidden></div>
+      </div>
+
+      <div class="card section">
+        <div class="section-head section-head-with-action">
+          <div>
+            <h2>Staff Members</h2>
+            <span class="squiggle" aria-hidden="true"></span>
+          </div>
+          <div class="section-actions">
+            <button type="button" id="create-staff-btn" class="btn btn-icon-with-text" title="Create staff member" aria-label="Create staff member">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M19 8v6M22 11h-6"/></svg>
+              <span>Create staff member</span>
+            </button>
+            <button type="button" id="holidays-btn" class="btn btn-icon-with-text" title="Holidays" aria-label="Holidays">
+              <svg class="icon-holiday" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M8 2v4M16 2v4M3 10h18M5 4h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z"/><path d="M8 14h.01M12 14h.01M16 14h.01M8 18h.01M12 18h.01M16 18h.01"/></svg>
+              <span>Holidays</span>
+            </button>
+            <button type="button" id="refresh-leads-btn" class="btn btn-secondary">Refresh leads</button>
+          </div>
+        </div>
+        <p class="hint">Toggle availability. Data from HubSpot Staff custom object.</p>
+        <div class="staff-search-wrap">
+          <input type="search" id="staff-search-input" class="staff-search-input" placeholder="Search staff by name…" autocomplete="off" aria-label="Search staff by name" />
+          <div id="staff-search-results" class="staff-search-results" hidden role="listbox" aria-label="Staff search results"></div>
+        </div>
+        <div id="staff-loading" class="loading">Loading…</div>
+        <div id="staff-error" class="error" hidden></div>
+
+        <div id="staff-active-section" class="staff-subsection">
+          <h3 class="staff-subsection-title">Active</h3>
+          <div class="table-scroll-wrap">
+            <div class="table-wrap">
+              <table id="staff-table-active" class="table staff-table">
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th title="Minutes on calls in last 2 hours. Red = available, green = busy.">Calls</th>
+                    <th title="Inbound Lead Team">Inbound</th>
+                    <th title="PIP Lead Team">PIP</th>
+                    <th title="Panther Lead Team">Panther</th>
+                    <th title="Frosties Lead Team">Frosties</th>
+                    <th>Availability</th>
+                    <th>Pause leads</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <div id="staff-inactive-section" class="staff-subsection">
+          <h3 class="staff-subsection-title">Inactive</h3>
+          <div class="table-scroll-wrap">
+            <div class="table-wrap">
+              <table id="staff-table-inactive" class="table staff-table">
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th title="Minutes on calls in last 2 hours. Red = available, green = busy.">Calls</th>
+                    <th title="Inbound Lead Team">Inbound</th>
+                    <th title="PIP Lead Team">PIP</th>
+                    <th title="Panther Lead Team">Panther</th>
+                    <th title="Frosties Lead Team">Frosties</th>
+                    <th>Availability</th>
+                    <th>Pause leads</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="call-activity" class="panel" hidden>
+      <div class="card section" id="call-activity-section">
+        <div class="section-head">
+          <h2>Call activity (last 2 hours)</h2>
+          <span class="squiggle" aria-hidden="true"></span>
+        </div>
+        <p class="hint">Most active call-wise at the top. Red = fewer minutes on calls, green = more.</p>
+        <div id="call-activity-loading" class="loading" hidden>Loading…</div>
+        <div id="call-activity-chart" class="call-activity-chart"></div>
+      </div>
+    </section>
+
+    <section id="team-mgmt" class="panel" hidden>
+      <div class="card section">
+        <div class="section-head">
+          <h2>Lead Teams</h2>
+          <span class="squiggle" aria-hidden="true"></span>
+        </div>
+        <p class="hint">Set the maximum number of leads per team. Changes sync to HubSpot and to staff in that team.</p>
+        <div id="lead-teams-loading" class="loading">Loading…</div>
+        <div id="lead-teams-error" class="error" hidden></div>
+        <div class="table-wrap">
+          <table id="lead-teams-table" class="table" hidden>
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th title="Contacts with no owner matching this team's lead_priority">Unallocated</th>
+                <th>Max leads</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <p id="lead-teams-empty" class="empty" hidden>No lead teams or object ID not set.</p>
+      </div>
+    </section>
+
+    <section id="data" class="panel" hidden>
+      <div class="card section" id="activity-log-section">
+        <div class="section-head">
+          <h2>Background activity</h2>
+          <span class="squiggle" aria-hidden="true"></span>
+        </div>
+        <p class="hint">Refreshes and manual actions. Newest at the bottom.</p>
+        <div id="activity-log-loading" class="loading" hidden>Loading…</div>
+        <div id="activity-log-error" class="error" hidden></div>
+        <div id="activity-log-list" class="activity-log-list"></div>
+      </div>
+    </section>
+
+    <section id="dryrun" class="panel" hidden>
+      <div class="card section">
+        <div class="section-head">
+          <h2>Test run</h2>
+          <span class="squiggle" aria-hidden="true"></span>
+        </div>
+        <p class="hint">Run the distribution process for all currently active staff. No contacts are assigned; you’ll see what would have been done and why.</p>
+        <div class="form">
+          <button type="button" id="run-process-btn" class="btn">Run process</button>
+        </div>
+        <div id="dry-run-loading" class="loading" hidden>Running…</div>
+        <div id="dry-run-error" class="error" hidden></div>
+        <div id="dry-run-result" class="result-box" hidden>
+          <h3>Test run result</h3>
+          <div id="dry-run-summary" class="summary"></div>
+          <div id="dry-run-per-owner"></div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <div id="confirm-modal" class="modal" hidden aria-modal="true" role="dialog" aria-labelledby="confirm-modal-title">
+    <div class="modal-backdrop"></div>
+    <div class="modal-dialog card">
+      <p id="confirm-modal-title" class="modal-message"></p>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-secondary modal-cancel">Cancel</button>
+        <button type="button" class="btn modal-confirm">Confirm</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="holidays-modal" class="modal" hidden aria-modal="true" role="dialog" aria-labelledby="holidays-modal-title">
+    <div class="modal-backdrop"></div>
+    <div class="modal-dialog card holidays-dialog">
+      <h2 id="holidays-modal-title" class="section-head">Holidays</h2>
+      <p class="hint">Block dates per staff. From 00:00 on start day they are set inactive; when they return, active again.</p>
+      <div id="holidays-list-wrap">
+        <div id="holidays-loading" class="loading" hidden>Loading…</div>
+        <ul id="holidays-list" class="holidays-list"></ul>
+        <p id="holidays-empty" class="empty" hidden>No holidays booked.</p>
+      </div>
+      <div id="holiday-form-wrap" class="holiday-form-wrap" hidden>
+        <h3 class="holiday-form-title">Add holiday</h3>
+        <form id="holiday-form" class="form">
+          <input type="hidden" id="holiday-edit-id" name="holiday_id" value="" />
+          <label>
+            Staff
+            <select id="holiday-staff" name="staff_id" required></select>
+          </label>
+          <label>
+            From
+            <input type="date" id="holiday-start" name="start_date" required />
+          </label>
+          <label>
+            To
+            <input type="date" id="holiday-end" name="end_date" required />
+          </label>
+          <label>
+            Label (optional)
+            <input type="text" id="holiday-label" name="label" placeholder="e.g. Annual leave" />
+          </label>
+          <div class="form-actions">
+            <button type="button" id="holiday-form-cancel" class="btn btn-secondary">Cancel</button>
+            <button type="submit" class="btn">Confirm</button>
+          </div>
+        </form>
+      </div>
+      <div class="modal-actions" id="holidays-modal-actions">
+        <button type="button" id="holiday-add-btn" class="btn">Add holiday</button>
+        <button type="button" class="btn btn-secondary holidays-close">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="create-staff-modal" class="modal" hidden aria-modal="true" role="dialog" aria-labelledby="create-staff-modal-title">
+    <div class="modal-backdrop" data-close="create-staff-modal"></div>
+    <div class="modal-dialog card holidays-dialog">
+      <h2 id="create-staff-modal-title" class="section-head">Create staff member</h2>
+      <p class="hint">Each HubSpot user can have only one staff member. Select a user who does not have one yet.</p>
+      <div id="create-staff-loading" class="loading" hidden>Loading users…</div>
+      <div id="create-staff-form-wrap" class="holiday-form-wrap" hidden>
+        <form id="create-staff-form" class="form">
+          <input type="hidden" id="create-staff-owner" name="hubspot_owner_id" value="" />
+          <div class="form-group">
+            <label for="create-staff-search">Search users</label>
+            <input type="text" id="create-staff-search" class="create-staff-search-input" placeholder="Type to search, then click a user…" autocomplete="off" />
+          </div>
+          <div class="form-group">
+            <label class="create-staff-list-label">Choose a user</label>
+            <div id="create-staff-user-list" class="create-staff-user-list" role="listbox" aria-label="HubSpot users"></div>
+            <p id="create-staff-no-match" class="create-staff-no-match" hidden>No matching users. Try a different search.</p>
+          </div>
+          <div id="create-staff-teams-wrap" class="form-group create-staff-teams-wrap" hidden>
+            <label class="create-staff-list-label">Assign teams</label>
+            <p class="hint">Click a team to add or remove before creating.</p>
+            <div id="create-staff-teams" class="create-staff-teams"></div>
+          </div>
+          <p id="create-staff-error" class="create-staff-error" hidden role="alert"></p>
+          <div class="form-actions">
+            <button type="submit" id="create-staff-submit" class="btn">Create staff member</button>
+            <button type="button" id="create-staff-cancel" class="btn btn-secondary">Cancel</button>
+          </div>
+        </form>
+      </div>
+      <p id="create-staff-empty" class="empty" hidden>All HubSpot users already have a staff member.</p>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-secondary create-staff-close">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/app.js"></script>
+</body>
+</html>
