@@ -1,387 +1,1096 @@
 """
-Kinly Lead Distribution - Flask backend.
-Serves frontend static files and all /api routes.
+Kinly Lead Distribution - Flask API and dashboard.
 """
+import logging
 import os
 import threading
-from flask import Flask, request, jsonify, send_from_directory, redirect, session
+import time
+from datetime import datetime, timezone
+from typing import Any, Optional
+
+# Load .env from the app directory (works with or without python-dotenv)
+_app_dir = os.path.dirname(os.path.abspath(__file__))
+_env_path = os.path.join(_app_dir, ".env")
+if os.path.exists(_env_path):
+    try:
+        from dotenv import load_dotenv
+        load_dotenv(_env_path)
+    except ImportError:
+        # Fallback: read .env and set os.environ
+        with open(_env_path) as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith("#") and "=" in line:
+                    key, _, val = line.partition("=")
+                    key, val = key.strip(), val.strip()
+                    if key and val and val not in ('""', "''"):
+                        os.environ.setdefault(key, val.strip('"').strip("'"))
+
+from flask import Flask, request, jsonify, send_from_directory, redirect
+from flask_cors import CORS
 
 from config import (
     HUBSPOT_ACCESS_TOKEN,
-    HUBSPOT_STAFF_OBJECT_ID,
     HUBSPOT_LEAD_TEAM_OBJECT_ID,
+    HUBSPOT_STAFF_OBJECT_ID,
+    WEBHOOK_SECRET,
     SESSION_SECRET,
+    APP_PASSWORD_HASH,
+    SMTP_HOST,
+    SMTP_PORT,
+    SMTP_USER,
+    SMTP_PASSWORD,
+    EMAIL_FROM,
+    ALLOWED_EMAILS,
 )
-import hubspot_client as hc
-import holidays as holidays_mod
-import activity_log as activity_log_mod
-from auth import (
-    send_otp,
-    verify_otp,
-    login_user,
-    logout_user,
-    current_user,
-    login_required,
-    is_allowed_email,
-)
-from distribution_engine import run_dry_run
+from hubspot_client import HubSpotClient
+from itsdangerous import URLSafeTimedSerializer
+import bcrypt
 
-app = Flask(__name__, static_folder="frontend", static_url_path="")
-app.secret_key = SESSION_SECRET
-app.config["SESSION_COOKIE_HTTPONLY"] = True
-app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
-app.config["PERMANENT_SESSION_LIFETIME"] = 2592000  # 30 days
-if os.environ.get("RAILWAY_ENVIRONMENT") or os.environ.get("FLASK_ENV") == "production":
-    app.config["SESSION_COOKIE_SECURE"] = True
+# Map Lead Team name (from HubSpot) -> Staff object property to update when max_leads changes
+TEAM_NAME_TO_STAFF_MAX_PROP = {
+    "Inbound Lead Team": "max_inbound_leads",
+    "PIP Lead Team": "max_pip_leads",
+    "Panther Lead Team": "max_panther_leads",
+    "Frosties Lead Team": "max_frosties_leads",
+}
 
-# Optional: ensure frontend paths
-FRONTEND = os.path.join(os.path.dirname(__file__), "frontend")
+# Use absolute path so dashboard loads regardless of working directory
+_frontend_dir = os.path.join(_app_dir, "frontend")
+app = Flask(__name__, static_folder=_frontend_dir, static_url_path="")
+CORS(app)
+
+# Auth: when SESSION_SECRET is set and at least one method (password or email OTP) is configured
+SESSION_COOKIE_NAME = "kinly_session"
+SESSION_MAX_AGE_SECONDS = 24 * 3600  # 24 hours
+EMAIL_OTP_ENABLED = bool(SESSION_SECRET and SMTP_HOST and EMAIL_FROM)
+AUTH_ENABLED = bool(SESSION_SECRET and (APP_PASSWORD_HASH or EMAIL_OTP_ENABLED))
+
+# One-time code store (in-memory): email -> { "code": str, "expires_at": timestamp }
+_otp_store = {}
+_otp_lock = threading.Lock()
+# Rate limit: email -> last send time; IP -> list of send times (for cleanup we trim old)
+_otp_email_last_send = {}
+_otp_ip_sends = {}
+OTP_CODE_EXPIRY_SECONDS = 15 * 60  # 15 minutes
+OTP_RATE_EMAIL_SECONDS = 2 * 60  # 1 code per email per 2 minutes
+OTP_RATE_IP_MAX = 10
+OTP_RATE_IP_WINDOW = 15 * 60  # 10 sends per IP per 15 minutes
 
 
-def _staff_with_holiday(staff_list):
-    for s in staff_list:
-        s["on_holiday_today"] = holidays_mod.is_on_holiday_today(str(s.get("id") or ""))
-    return staff_list
+def _session_serializer():
+    if not SESSION_SECRET:
+        return None
+    return URLSafeTimedSerializer(SESSION_SECRET, salt="kinly-login")
 
 
-# ---------- Static and login page ----------
-@app.route("/")
-def index():
-    if not current_user():
+def _verify_session_cookie():
+    if not AUTH_ENABLED:
+        return True
+    val = request.cookies.get(SESSION_COOKIE_NAME)
+    if not val:
+        return False
+    ser = _session_serializer()
+    if not ser:
+        return False
+    try:
+        ser.loads(val, max_age=SESSION_MAX_AGE_SECONDS)
+        return True
+    except Exception:
+        return False
+
+
+def _set_session_cookie(response):
+    ser = _session_serializer()
+    if not ser:
+        return response
+    token = ser.dumps("authenticated")
+    secure = os.getenv("FLASK_DEBUG", "").lower() not in ("1", "true", "yes")
+    response.set_cookie(
+        SESSION_COOKIE_NAME,
+        value=token,
+        max_age=SESSION_MAX_AGE_SECONDS,
+        httponly=True,
+        secure=secure,
+        samesite="Lax",
+        path="/",
+    )
+    return response
+
+
+@app.before_request
+def _require_auth():
+    if not AUTH_ENABLED:
+        return None
+    path = request.path.rstrip("/") or "/"
+    if path == "/login":
+        return None
+    if path == "/api/login" or path == "/api/logout":
+        return None
+    if path in ("/api/auth/send-code", "/api/auth/verify-code", "/api/auth/methods"):
+        return None
+    if path == "/api/health":
+        return None
+    if path == "/api/webhooks/lead-team-max-leads":
+        return None
+    if _verify_session_cookie():
+        return None
+    # Unauthenticated: redirect main page to login
+    if path == "/":
         return redirect("/login")
-    return send_from_directory(FRONTEND, "index.html")
+    # Allow static assets (login page needs logo, CSS, etc.) without auth
+    if not path.startswith("/api/"):
+        return None
+    return jsonify({"error": "Unauthorized"}), 401
 
 
+# Background refresh every 6 minutes: staff open leads + team max_leads → staff
+REFRESH_INTERVAL_SECONDS = 6 * 60  # 6 minutes
+_log = logging.getLogger(__name__)
+
+# In-memory activity log (last N events) for dashboard visibility
+_activity_log: list = []
+_activity_log_max = 100
+_activity_lock = threading.Lock()
+
+# Manual refresh: run in background so the HTTP request doesn't time out
+_refresh_in_progress = False
+_refresh_lock = threading.Lock()
+
+
+def _log_activity(event: str, message: str, details: Optional[dict] = None) -> None:
+    """Append an entry to the activity log (thread-safe)."""
+    from datetime import datetime, timezone
+    entry = {
+        "time": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "event": event,
+        "message": message,
+    }
+    if details:
+        entry["details"] = details
+    with _activity_lock:
+        _activity_log.append(entry)
+        while len(_activity_log) > _activity_log_max:
+            _activity_log.pop(0)
+
+
+def get_client() -> HubSpotClient:
+    if not HUBSPOT_ACCESS_TOKEN:
+        raise ValueError("HUBSPOT_ACCESS_TOKEN not set")
+    return HubSpotClient(HUBSPOT_ACCESS_TOKEN)
+
+
+# Call minutes in last 120 minutes (for temperature gauge)
+CALL_MINUTES_WINDOW = 120
+# Fetch calls that started this far back so we include long calls that overlap the window
+CALL_FETCH_WINDOW_MINUTES = 360  # 6 hours
+
+
+def _timestamp_to_ms(ts: Any) -> Optional[int]:
+    """Convert HubSpot timestamp (ISO 8601 string or epoch number in sec/ms) to epoch milliseconds."""
+    if ts is None:
+        return None
+    if isinstance(ts, dict) and "value" in ts:
+        ts = ts["value"]
+    if isinstance(ts, str):
+        ts = ts.strip()
+        if not ts:
+            return None
+        # ISO 8601 e.g. "2024-01-17T19:55:04.281Z"
+        if "T" in ts or "-" in ts:
+            try:
+                # fromisoformat needs Z replaced for Python 3.10 and earlier
+                normalized = ts.replace("Z", "+00:00")
+                dt = datetime.fromisoformat(normalized)
+                return int(dt.timestamp() * 1000)
+            except Exception:
+                return None
+        try:
+            n = int(ts)
+            return n * 1000 if n < 1e12 else n
+        except (TypeError, ValueError):
+            return None
+    try:
+        n = int(ts)
+        return n * 1000 if n < 1e12 else n
+    except (TypeError, ValueError):
+        return None
+
+
+def _duration_to_ms(dur: Any) -> Optional[int]:
+    """Convert HubSpot call duration to milliseconds (API reports duration in ms)."""
+    if dur is None:
+        return None
+    if isinstance(dur, dict) and "value" in dur:
+        dur = dur["value"]
+    try:
+        return int(dur)
+    except (TypeError, ValueError):
+        return None
+
+
+def _get_call_minutes_last_120(client: HubSpotClient, hubspot_owner_id: str):
+    """Sum call duration for this owner in the last 120 minutes. Only counts the portion of each
+    call that falls inside the 2-hour window (calls that span the window boundary are prorated).
+    Returns minutes, or None on error."""
+    if not hubspot_owner_id:
+        return 0
+    try:
+        now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+        window_ms = CALL_MINUTES_WINDOW * 60 * 1000
+        since_ms = now_ms - window_ms
+        fetch_since_ms = now_ms - (CALL_FETCH_WINDOW_MINUTES * 60 * 1000)
+        res = client.search_calls(
+            filter_groups=[{
+                "filters": [
+                    {"propertyName": "hubspot_owner_id", "operator": "EQ", "value": str(hubspot_owner_id)},
+                    {"propertyName": "hs_timestamp", "operator": "GTE", "value": str(fetch_since_ms)},
+                ],
+            }],
+            properties=["hs_timestamp", "hs_call_duration"],
+            limit=100,
+        )
+        total_ms = 0
+        for r in res.get("results", []):
+            props = r.get("properties") or {}
+            start_ms = _timestamp_to_ms(props.get("hs_timestamp"))
+            duration_ms = _duration_to_ms(props.get("hs_call_duration"))
+            if start_ms is None or duration_ms is None:
+                continue
+            end_ms = start_ms + duration_ms
+            # Overlap of call [start_ms, end_ms] with window [since_ms, now_ms]
+            overlap_start = max(start_ms, since_ms)
+            overlap_end = min(end_ms, now_ms)
+            overlap_ms = max(0, overlap_end - overlap_start)
+            total_ms += overlap_ms
+        return round(total_ms / 60000)  # milliseconds to minutes
+    except Exception:
+        return None
+
+
+# --- Health ---
+@app.route("/api/health")
+def health():
+    return jsonify({"ok": True, "hubspot_configured": bool(HUBSPOT_ACCESS_TOKEN)})
+
+
+# --- Login (when SESSION_SECRET and APP_PASSWORD_HASH are set) ---
 @app.route("/login", methods=["GET"])
 def login_page():
-    if current_user():
-        return redirect("/")
-    return send_from_directory(FRONTEND, "login.html")
+    folder = app.static_folder or ""
+    login_path = os.path.join(folder, "login.html")
+    if folder and os.path.isfile(login_path):
+        return send_from_directory(folder, "login.html")
+    return "<p>Login page not found.</p>", 404
 
 
-@app.route("/style.css")
-def style_css():
-    return send_from_directory(FRONTEND, "style.css")
-
-
-@app.route("/app.js")
-def app_js():
-    return send_from_directory(FRONTEND, "app.js")
-
-
-@app.route("/images/<path:filename>")
-def images(filename):
-    return send_from_directory(os.path.join(FRONTEND, "images"), filename)
-
-
-# ---------- Auth API ----------
 @app.route("/api/login", methods=["POST"])
-def api_login_send():
-    data = request.get_json() or {}
+def login():
+    if not AUTH_ENABLED:
+        return jsonify({"ok": True})
+    data = request.get_json(silent=True) or {}
+    password = (data.get("password") or "").encode("utf-8")
+    if not password:
+        return jsonify({"error": "Password required"}), 400
+    stored_hash = (APP_PASSWORD_HASH or "").encode("utf-8")
+    if not stored_hash:
+        return jsonify({"error": "Password required"}), 400
+    try:
+        if not bcrypt.checkpw(password, stored_hash):
+            return jsonify({"error": "Invalid password"}), 401
+    except Exception:
+        return jsonify({"error": "Invalid password"}), 401
+    resp = jsonify({"ok": True})
+    return _set_session_cookie(resp)
+
+
+@app.route("/api/logout", methods=["POST"])
+def logout():
+    resp = jsonify({"ok": True})
+    resp.set_cookie(
+        SESSION_COOKIE_NAME,
+        value="",
+        max_age=0,
+        httponly=True,
+        secure=os.getenv("FLASK_DEBUG", "").lower() not in ("1", "true", "yes"),
+        samesite="Lax",
+        path="/",
+    )
+    return resp
+
+
+# --- Passwordless: one-time code to email ---
+def _send_otp_email(to_email: str, code: str) -> None:
+    """Send OTP code. Prefer SendGrid API when using SendGrid (same as verification); else SMTP."""
+    subject = f"Kinly Lead Distribution verification code (expires in 15 minutes) {datetime.now(timezone.utc).strftime('%d%m%y - %H:%M')}"
+    body = f"""Hi there,
+
+Here's your one-time sign-in code for the Kinly Lead Distribution App:
+
+{code}
+
+This code will expire in 15 minutes.
+
+If you didn't request this sign-in code, you can safely ignore this email.
+
+Thanks,
+Kinly Lead Distribution App"""
+    # Use SendGrid HTTP API when we have their key (same method that passed verification)
+    if SMTP_HOST and "sendgrid" in SMTP_HOST.lower() and SMTP_PASSWORD:
+        try:
+            from sendgrid import SendGridAPIClient
+            from sendgrid.helpers.mail import Mail
+            message = Mail(
+                from_email=EMAIL_FROM,
+                to_emails=to_email,
+                subject=subject,
+                plain_text_content=body,
+            )
+            sg = SendGridAPIClient(SMTP_PASSWORD)
+            response = sg.send(message)
+            if response.status_code not in (200, 201, 202):
+                raise RuntimeError(f"SendGrid returned {response.status_code}")
+            return
+        except Exception as e:
+            _log.warning("SendGrid API send failed (%s), trying SMTP", e)
+    # SMTP fallback
+    import ssl
+    import smtplib
+    from email.mime.text import MIMEText
+    from email.mime.multipart import MIMEMultipart
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = subject
+    msg["From"] = EMAIL_FROM
+    msg["To"] = to_email
+    msg.attach(MIMEText(body, "plain"))
+    context = ssl.create_default_context()
+    if SMTP_PORT == 465:
+        with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, context=context, timeout=30) as smtp:
+            if SMTP_USER and SMTP_PASSWORD:
+                smtp.login(SMTP_USER, SMTP_PASSWORD)
+            smtp.sendmail(EMAIL_FROM, [to_email], msg.as_string())
+    else:
+        with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=30) as smtp:
+            smtp.starttls(context=context)
+            if SMTP_USER and SMTP_PASSWORD:
+                smtp.login(SMTP_USER, SMTP_PASSWORD)
+            smtp.sendmail(EMAIL_FROM, [to_email], msg.as_string())
+
+
+@app.route("/api/auth/methods", methods=["GET"])
+def auth_methods():
+    """Return which login methods are enabled (for login page UI)."""
+    return jsonify({
+        "password": bool(APP_PASSWORD_HASH),
+        "email_code": EMAIL_OTP_ENABLED,
+    })
+
+
+@app.route("/api/auth/send-code", methods=["POST"])
+def send_code():
+    """Send a one-time code to the given email. Rate-limited."""
+    if not EMAIL_OTP_ENABLED:
+        return jsonify({"error": "Email sign-in is not configured"}), 400
+    data = request.get_json(silent=True) or {}
     email = (data.get("email") or "").strip().lower()
-    if not email:
-        return jsonify({"error": "Email required"}), 400
-    err = send_otp(email)
-    if err:
-        return jsonify({"error": err}), 400
-    return jsonify({"sent": True})
+    if not email or "@" not in email:
+        return jsonify({"error": "Valid email required"}), 400
+    if ALLOWED_EMAILS and email not in ALLOWED_EMAILS:
+        return jsonify({"error": "This email is not allowed to sign in"}), 403
+    now = time.time()
+    with _otp_lock:
+        # Rate limit per email
+        last = _otp_email_last_send.get(email, 0)
+        if now - last < OTP_RATE_EMAIL_SECONDS:
+            return jsonify({"error": "Please wait a few minutes before requesting another code"}), 429
+        # Rate limit per IP
+        ip = request.remote_addr or "unknown"
+        window_start = now - OTP_RATE_IP_WINDOW
+        _otp_ip_sends.setdefault(ip, [])
+        _otp_ip_sends[ip] = [t for t in _otp_ip_sends[ip] if t > window_start]
+        if len(_otp_ip_sends[ip]) >= OTP_RATE_IP_MAX:
+            return jsonify({"error": "Too many requests; try again later"}), 429
+        _otp_ip_sends[ip].append(now)
+        # Generate and store code
+        import random
+        code = "".join(str(random.randint(0, 9)) for _ in range(6))
+        _otp_store[email] = {"code": code, "expires_at": now + OTP_CODE_EXPIRY_SECONDS}
+        _otp_email_last_send[email] = now
+    try:
+        _send_otp_email(email, code)
+    except Exception as e:
+        _log.exception("Send OTP email failed: %s", e)
+        with _otp_lock:
+            _otp_store.pop(email, None)
+        return jsonify({"error": "Failed to send email; try again later"}), 500
+    return jsonify({"ok": True, "message": "Check your email for the code"})
 
 
-@app.route("/api/login/verify", methods=["POST"])
-def api_login_verify():
-    data = request.get_json() or {}
+@app.route("/api/auth/verify-code", methods=["POST"])
+def verify_code():
+    """Verify one-time code and set session cookie."""
+    if not EMAIL_OTP_ENABLED:
+        return jsonify({"error": "Email sign-in is not configured"}), 400
+    data = request.get_json(silent=True) or {}
     email = (data.get("email") or "").strip().lower()
     code = (data.get("code") or "").strip()
     if not email or not code:
         return jsonify({"error": "Email and code required"}), 400
-    if not verify_otp(email, code):
-        return jsonify({"error": "Invalid or expired code"}), 400
-    login_user(email)
-    return jsonify({"ok": True})
+    now = time.time()
+    with _otp_lock:
+        entry = _otp_store.get(email)
+        if not entry:
+            return jsonify({"error": "Invalid or expired code"}), 401
+        if now > entry["expires_at"]:
+            del _otp_store[email]
+            return jsonify({"error": "Code has expired; request a new one"}), 401
+        if entry["code"] != code:
+            return jsonify({"error": "Invalid code"}), 401
+        del _otp_store[email]
+    resp = jsonify({"ok": True})
+    return _set_session_cookie(resp)
 
 
-@app.route("/api/logout", methods=["POST"])
-def api_logout():
-    logout_user()
-    return jsonify({"ok": True})
+# --- Lead Teams (list + patch max_leads) ---
+def _count_unallocated_contacts(client: HubSpotClient, lead_priority_values: list[str]) -> int:
+    """Count contacts with no owner, no assign_lead, lead_priority in values, and hs_lead_status = Open Lead."""
+    if not lead_priority_values:
+        return 0
+    search_res = client.search_contacts(
+        filter_groups=[{
+            "filters": [
+                {"propertyName": "hubspot_owner_id", "operator": "NOT_HAS_PROPERTY"},
+                {"propertyName": "assign_lead", "operator": "NOT_HAS_PROPERTY"},
+                {"propertyName": "lead_priority", "operator": "IN", "values": lead_priority_values},
+                {"propertyName": "hs_lead_status", "operator": "EQ", "value": "Open Lead"},
+            ],
+        }],
+        properties=["lead_priority"],
+        limit=1,
+    )
+    return search_res.get("total", 0) or 0
 
 
-# ---------- Health (no auth) ----------
-@app.route("/api/health")
-def api_health():
-    ok = bool(HUBSPOT_ACCESS_TOKEN)
-    try:
-        if ok:
-            hc.test_connection()
-    except Exception:
-        ok = False
-    return jsonify({"hubspot_configured": ok})
-
-
-# ---------- Staff ----------
-@app.route("/api/staff", methods=["GET"])
-@login_required
-def api_staff_list():
-    try:
-        staff = hc.get_all_staff()
-        staff = _staff_with_holiday(staff)
-        return jsonify({"staff": staff})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-
-@app.route("/api/staff/field-options/pause_leads")
-@login_required
-def api_staff_field_options_pause_leads():
-    # Static options; can be moved to config or HubSpot enum
-    options = [
-        {"value": "Paused", "label": "Paused"},
-        {"value": "Busy", "label": "Busy"},
-        {"value": "Other", "label": "Other"},
-    ]
-    return jsonify({"options": options})
-
-
-def _parse_lead_teams(s: str):
-    if not s or not isinstance(s, str):
-        return []
-    return [t.strip() for t in s.split(";") if t.strip()]
-
-
-def _format_lead_teams(teams: list):
-    return "; ".join(teams)
-
-
-@app.route("/api/staff", methods=["POST"])
-@login_required
-def api_staff_create():
-    data = request.get_json() or {}
-    owner_id = (data.get("hubspot_owner_id") or "").strip()
-    lead_teams = data.get("lead_teams") or []
-    if not owner_id:
-        return jsonify({"error": "hubspot_owner_id required"}), 400
-    if not HUBSPOT_STAFF_OBJECT_ID:
-        return jsonify({"error": "Staff object not configured"}), 500
-    try:
-        props = {
-            "hubspot_owner_id": owner_id,
-            "availability": "Available",
-            "lead_teams": _format_lead_teams(lead_teams) if isinstance(lead_teams, list) else str(lead_teams),
-        }
-        created = hc.create_custom_object(HUBSPOT_STAFF_OBJECT_ID, props)
-        staff_id = created.get("id")
-        staff = hc.get_staff_by_id(staff_id) if staff_id else None
-        if staff:
-            staff["on_holiday_today"] = holidays_mod.is_on_holiday_today(str(staff_id))
-        lead_teams_warning = None
-        return jsonify({"staff": staff or created}), 201
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-
-@app.route("/api/staff/<staff_id>", methods=["PATCH"])
-@login_required
-def api_staff_patch(staff_id):
-    data = request.get_json() or {}
-    if not HUBSPOT_STAFF_OBJECT_ID:
-        return jsonify({"error": "Staff object not configured"}), 500
-    try:
-        staff = hc.get_staff_by_id(staff_id)
-        if not staff:
-            return jsonify({"error": "Staff not found"}), 404
-        props = {}
-        if "availability" in data:
-            props["availability"] = str(data["availability"])
-        if "pause_leads" in data:
-            props["pause_leads"] = str(data["pause_leads"]).strip() or ""
-        if "add_team" in data:
-            teams = _parse_lead_teams(staff.get("lead_teams") or "")
-            add = (data.get("add_team") or "").strip()
-            if add and add not in teams:
-                teams.append(add)
-            props["lead_teams"] = _format_lead_teams(teams)
-        if "remove_team" in data:
-            teams = _parse_lead_teams(staff.get("lead_teams") or "")
-            remove = (data.get("remove_team") or "").strip()
-            teams = [t for t in teams if t != remove]
-            props["lead_teams"] = _format_lead_teams(teams)
-        if not props:
-            return jsonify(staff)
-        hc.patch_custom_object(HUBSPOT_STAFF_OBJECT_ID, staff_id, props)
-        updated = hc.get_staff_by_id(staff_id)
-        if updated:
-            updated["on_holiday_today"] = holidays_mod.is_on_holiday_today(str(staff_id))
-        return jsonify(updated or staff)
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-
-_refresh_running = False
-_refresh_result = None
-
-
-@app.route("/api/staff/refresh-leads", methods=["POST"])
-@login_required
-def api_staff_refresh_leads():
-    global _refresh_running, _refresh_result
-    if _refresh_running:
-        return jsonify({"status": "already_running"})
-    def run():
-        global _refresh_running, _refresh_result
-        _refresh_running = True
-        _refresh_result = None
-        try:
-            staff = hc.get_all_staff()
-            activity_log_mod.log("refresh_leads", "Manual refresh completed", {"updated": len(staff)})
-            _refresh_result = {"updated": len(staff), "errors": []}
-        except Exception as e:
-            activity_log_mod.log("refresh_error", str(e), {})
-            _refresh_result = {"updated": 0, "errors": [{"error": str(e)}]}
-        finally:
-            _refresh_running = False
-    threading.Thread(target=run).start()
-    return jsonify({"status": "started"})
-
-
-# ---------- Lead teams ----------
 @app.route("/api/lead-teams", methods=["GET"])
-@login_required
-def api_lead_teams_list():
+def list_lead_teams():
+    from config import LEAD_PRIORITY_BY_TYPE
+    if not HUBSPOT_LEAD_TEAM_OBJECT_ID:
+        return jsonify({"lead_teams": [], "message": "HUBSPOT_LEAD_TEAM_OBJECT_ID not set"}), 200
     try:
-        if not HUBSPOT_LEAD_TEAM_OBJECT_ID:
-            return jsonify({"lead_teams": [], "message": "Lead teams not configured"})
-        teams = hc.get_all_lead_teams()
-        return jsonify({"lead_teams": teams})
+        client = get_client()
+        result = client.search_custom_objects(
+            HUBSPOT_LEAD_TEAM_OBJECT_ID,
+            filter_groups=[{"filters": [{"propertyName": "name", "operator": "HAS_PROPERTY"}]}],
+            properties=["name", "max_leads"],
+            limit=100,
+        )
+        if not isinstance(result, dict):
+            result = {"results": []}
+        def _prop(p, key):
+            v = p.get(key) if isinstance(p, dict) else None
+            if v is None:
+                return None
+            if isinstance(v, dict) and "value" in v:
+                return v["value"]
+            return v
+
+        items = []
+        for r in result.get("results", []):
+            props = r.get("properties") or {}
+            if not isinstance(props, dict):
+                continue
+            team_name = _prop(props, "name") or r.get("id")
+            priorities = LEAD_PRIORITY_BY_TYPE.get(team_name, []) if team_name else []
+            unallocated = _count_unallocated_contacts(client, priorities) if priorities else 0
+            items.append({
+                "id": r.get("id"),
+                "name": team_name,
+                "max_leads": _prop(props, "max_leads"),
+                "unallocated": unallocated,
+            })
+        return jsonify({"lead_teams": items})
     except Exception as e:
-        return jsonify({"error": str(e), "lead_teams": []})
+        return jsonify({"error": str(e)}), 500
 
 
-@app.route("/api/lead-teams/<team_id>", methods=["PATCH"])
-@login_required
-def api_lead_teams_patch(team_id):
+def _prop_value(props: dict, key: str):
+    """Get a HubSpot property value (handles { value: ... } wrapper)."""
+    v = props.get(key) if isinstance(props, dict) else None
+    if v is None:
+        return None
+    if isinstance(v, dict) and "value" in v:
+        return v["value"]
+    return v
+
+
+def propagate_team_max_leads_to_staff(client: HubSpotClient, team_object_id: str, new_max_leads: int) -> int:
+    """
+    Update all staff in the given lead team with the new max_leads on the matching max_* property.
+    Returns the number of staff records updated.
+    """
+    if not HUBSPOT_STAFF_OBJECT_ID or not HUBSPOT_LEAD_TEAM_OBJECT_ID:
+        return 0
+    team_record = client.get_custom_object(
+        HUBSPOT_LEAD_TEAM_OBJECT_ID,
+        team_object_id,
+        properties=["name"],
+    )
+    props = team_record.get("properties") or {}
+    team_name = _prop_value(props, "name")
+    staff_prop = TEAM_NAME_TO_STAFF_MAX_PROP.get(team_name) if team_name else None
+    if not staff_prop:
+        return 0
+    search_result = client.search_custom_objects(
+        HUBSPOT_STAFF_OBJECT_ID,
+        filter_groups=[{
+            "filters": [{
+                "propertyName": "lead_teams",
+                "operator": "CONTAINS_TOKEN",
+                "value": team_name,
+            }],
+        }],
+        properties=["name"],
+        limit=100,
+    )
+    results = search_result.get("results") or []
+    if not results:
+        return 0
+    inputs = [
+        {"id": str(r["id"]), "properties": {staff_prop: str(new_max_leads)}}
+        for r in results
+    ]
+    client.batch_update_custom_objects(HUBSPOT_STAFF_OBJECT_ID, inputs)
+    return len(inputs)
+
+
+def run_periodic_refresh() -> None:
+    """
+    Run the full refresh: (1) recalc staff open lead counts, (2) apply holiday availability,
+    (3) sync each lead team's max_leads to staff, (4) run distribution and assign leads.
+    Safe to call from a background thread.
+    """
+    if not HUBSPOT_ACCESS_TOKEN:
+        return
+    _log_activity("refresh_start", "Background refresh started", {"source": "scheduled"})
+    try:
+        client = get_client()
+        # 1) Refresh open lead counts for all staff
+        from distribution_engine import refresh_staff_open_leads
+        result = refresh_staff_open_leads()
+        updated = result.get("updated", 0)
+        errors = result.get("errors", [])
+        _log.info("Periodic refresh: staff open leads updated=%s", updated)
+        _log_activity(
+            "refresh_leads",
+            f"Updated open lead counts for {updated} staff",
+            {"updated": updated, "errors": len(errors)},
+        )
+        # 2) Apply holiday availability: set Unavailable for staff on holiday today, restore when back
+        if HUBSPOT_STAFF_OBJECT_ID:
+            from holidays import apply_holiday_availability
+            staff_result = client.search_custom_objects(
+                HUBSPOT_STAFF_OBJECT_ID,
+                filter_groups=[{"filters": [{"propertyName": "hubspot_owner_id", "operator": "HAS_PROPERTY"}]}],
+                properties=["availability"],
+                limit=100,
+            )
+            staff_list = [{"id": r.get("id"), "availability": _prop_value(r.get("properties") or {}, "availability")} for r in (staff_result.get("results") or [])]
+            holiday_updates = apply_holiday_availability(client, HUBSPOT_STAFF_OBJECT_ID, staff_list)
+            changed = (holiday_updates.get("set_unavailable") or 0) + (holiday_updates.get("restored") or 0)
+            if changed > 0:
+                _log_activity(
+                    "refresh_holidays",
+                    "Holiday availability applied",
+                    {"set_unavailable": holiday_updates.get("set_unavailable", 0), "restored": holiday_updates.get("restored", 0)},
+                )
+        # 3) For each lead team, propagate its current max_leads to staff in that team
+        if HUBSPOT_LEAD_TEAM_OBJECT_ID and HUBSPOT_STAFF_OBJECT_ID:
+            search_result = client.search_custom_objects(
+                HUBSPOT_LEAD_TEAM_OBJECT_ID,
+                filter_groups=[{"filters": [{"propertyName": "name", "operator": "HAS_PROPERTY"}]}],
+                properties=["name", "max_leads"],
+                limit=100,
+            )
+            for r in (search_result.get("results") or []):
+                tid = r.get("id")
+                props = r.get("properties") or {}
+                max_leads = _prop_value(props, "max_leads")
+                if tid is not None and max_leads is not None:
+                    try:
+                        n = int(max_leads)
+                        propagate_team_max_leads_to_staff(client, str(tid), n)
+                    except (TypeError, ValueError):
+                        pass
+        # 4) Run distribution for all active staff (same as test run but actually assign leads)
+        from distribution_engine import run_distribution_for_all_active
+        dist_result = run_distribution_for_all_active(dry_run=False)
+        summary = dist_result.get("summary") or {}
+        total_assignments = summary.get("total_assignments", 0)
+        owners_processed = summary.get("owners_processed", 0)
+        _log_activity(
+            "distribution",
+            f"Distribution completed: assigned {total_assignments} contact(s) across {owners_processed} staff",
+            {"source": "scheduled", "total_assignments": total_assignments, "owners_processed": owners_processed},
+        )
+        _log_activity("refresh_done", "Background refresh completed")
+    except Exception as e:
+        _log.exception("Periodic refresh failed: %s", e)
+        _log_activity("refresh_error", f"Refresh failed: {e}", {"error": str(e)})
+
+
+@app.route("/api/lead-teams/<object_id>", methods=["PATCH"])
+def patch_lead_team(object_id):
+    if not HUBSPOT_LEAD_TEAM_OBJECT_ID:
+        return jsonify({"error": "HUBSPOT_LEAD_TEAM_OBJECT_ID not set"}), 400
     data = request.get_json() or {}
     max_leads = data.get("max_leads")
     if max_leads is None:
         return jsonify({"error": "max_leads required"}), 400
     try:
-        hc.patch_lead_team(team_id, int(max_leads))
-        teams = hc.get_all_lead_teams()
-        one = next((t for t in teams if str(t.get("id")) == str(team_id)), None)
-        return jsonify(one or {"id": team_id, "max_leads": max_leads})
+        client = get_client()
+        new_value = int(max_leads)
+        client.patch_custom_object(
+            HUBSPOT_LEAD_TEAM_OBJECT_ID,
+            object_id,
+            {"max_leads": new_value},
+        )
+        propagate_team_max_leads_to_staff(client, object_id, new_value)
+        return jsonify({"ok": True})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
 
-# ---------- Holidays ----------
-@app.route("/api/holidays", methods=["GET"])
-@login_required
-def api_holidays_list():
-    return jsonify({"holidays": holidays_mod.all_holidays()})
+# --- Webhook: HubSpot lead team max_leads changed (propagate to staff) ---
+@app.route("/api/webhooks/lead-team-max-leads", methods=["POST"])
+def webhook_lead_team_max_leads():
+    """
+    Called when a lead team's max_leads is updated (e.g. in HubSpot or by another system).
+    Payload shape (from n8n / typical webhook): body[0] or top-level with objectId, propertyName, propertyValue.
+    """
+    if WEBHOOK_SECRET:
+        secret = request.headers.get("X-Webhook-Secret") or request.args.get("secret")
+        if secret != WEBHOOK_SECRET:
+            return jsonify({"error": "Unauthorized"}), 401
+    data = request.get_json(silent=True) or {}
+    # Support body[0] (array) or flat object
+    payload = data.get("body")
+    if isinstance(payload, list) and payload:
+        payload = payload[0]
+    if not isinstance(payload, dict):
+        payload = data
+    object_id = payload.get("objectId") or payload.get("object_id")
+    property_name = (payload.get("propertyName") or payload.get("property_name") or "").strip()
+    property_value = payload.get("propertyValue") or payload.get("property_value")
+    if property_name and property_name != "max_leads":
+        return jsonify({"ok": True, "skipped": "not max_leads"}), 200
+    if not object_id:
+        return jsonify({"error": "objectId required"}), 400
+    try:
+        new_value = int(property_value) if property_value is not None else None
+    except (TypeError, ValueError):
+        return jsonify({"error": "invalid propertyValue"}), 400
+    if new_value is None:
+        return jsonify({"error": "propertyValue required"}), 400
+    if not HUBSPOT_LEAD_TEAM_OBJECT_ID or not HUBSPOT_STAFF_OBJECT_ID:
+        return jsonify({"ok": True, "skipped": "config missing"}), 200
+    try:
+        client = get_client()
+        updated = propagate_team_max_leads_to_staff(client, str(object_id), new_value)
+        return jsonify({"ok": True, "staff_updated": updated}), 200
+    except Exception as e:
+        app.logger.exception("Webhook lead-team-max-leads failed")
+        return jsonify({"ok": False, "error": str(e)}), 500
 
 
-@app.route("/api/holidays", methods=["POST"])
-@login_required
-def api_holidays_create():
-    data = request.get_json() or {}
-    staff_id = (data.get("staff_id") or "").strip()
-    start_date = (data.get("start_date") or "").strip()
-    end_date = (data.get("end_date") or "").strip()
-    label = (data.get("label") or "").strip()
-    if not staff_id or not start_date or not end_date:
-        return jsonify({"error": "staff_id, start_date, end_date required"}), 400
-    rec = holidays_mod.add_holiday(staff_id, start_date, end_date, label)
-    return jsonify(rec), 201
+# --- Staff (list + patch availability) ---
+def _run_manual_refresh_background() -> None:
+    """Run refresh in background; logs to activity when done. Avoids request timeout."""
+    global _refresh_in_progress
+    try:
+        from distribution_engine import refresh_staff_open_leads
+        result = refresh_staff_open_leads()
+        updated = result.get("updated", 0)
+        _log_activity("refresh_leads", f"Manual refresh: updated {updated} staff", {"source": "manual", "updated": updated})
+    except Exception as e:
+        _log_activity("refresh_error", f"Manual refresh failed: {e}", {"source": "manual", "error": str(e)})
+    finally:
+        with _refresh_lock:
+            _refresh_in_progress = False
 
 
-@app.route("/api/holidays/<holiday_id>", methods=["PATCH"])
-@login_required
-def api_holidays_update(holiday_id):
-    data = request.get_json() or {}
-    rec = holidays_mod.update_holiday(
-        holiday_id,
-        (data.get("staff_id") or "").strip(),
-        (data.get("start_date") or "").strip(),
-        (data.get("end_date") or "").strip(),
-        (data.get("label") or "").strip(),
-    )
-    if not rec:
-        return jsonify({"error": "Holiday not found"}), 404
-    return jsonify(rec)
+@app.route("/api/staff/refresh-leads", methods=["POST"])
+def refresh_staff_leads():
+    """Start refresh in background and return immediately (avoids Railway request timeout)."""
+    global _refresh_in_progress
+    with _refresh_lock:
+        if _refresh_in_progress:
+            return jsonify({"status": "already_running", "updated": 0}), 200
+        _refresh_in_progress = True
+    thread = threading.Thread(target=_run_manual_refresh_background, daemon=True, name="manual-refresh")
+    thread.start()
+    return jsonify({"status": "started", "updated": 0})
 
 
-@app.route("/api/holidays/<holiday_id>", methods=["DELETE"])
-@login_required
-def api_holidays_delete(holiday_id):
-    if not holidays_mod.delete_holiday(holiday_id):
-        return jsonify({"error": "Holiday not found"}), 404
-    return jsonify({"ok": True})
-
-
-# ---------- Activity log ----------
-@app.route("/api/activity-log")
-@login_required
-def api_activity_log():
-    limit = request.args.get("limit", 50, type=int)
-    limit = min(max(limit, 1), 200)
-    entries = activity_log_mod.get_entries(limit)
+@app.route("/api/activity-log", methods=["GET"])
+def activity_log():
+    """Return recent activity log entries (refreshes, errors). Most recent last."""
+    limit = min(int(request.args.get("limit", 50)), 200)
+    with _activity_lock:
+        entries = list(_activity_log[-limit:])
     return jsonify({"entries": entries})
 
 
-# ---------- Owners ----------
-@app.route("/api/owners")
-@login_required
-def api_owners():
+@app.route("/api/staff", methods=["GET"])
+def list_staff():
+    from config import HUBSPOT_STAFF_OBJECT_ID
     try:
-        owners = hc.list_owners()
-        return jsonify({"owners": owners})
+        client = get_client()
+        # List all staff (include "name" property from Staff custom object)
+        result = client.search_custom_objects(
+            HUBSPOT_STAFF_OBJECT_ID,
+            filter_groups=[{"filters": [{"propertyName": "hubspot_owner_id", "operator": "HAS_PROPERTY"}]}],
+            properties=[
+                "name",
+                "hubspot_owner_id",
+                "lead_teams",
+                "availability",
+                "pause_leads",
+                "max_pip_leads",
+                "max_inbound_leads",
+                "max_panther_leads",
+                "max_frosties_leads",
+                "open_pip_leads_n8n",
+                "open_inbound_leads_n8n",
+                "open_panther_leads",
+                "open_frosties_leads",
+            ],
+            limit=100,
+        )
+        if not isinstance(result, dict):
+            result = {"results": []}
+        def _v(props, k):
+            p = props.get(k) if isinstance(props, dict) else None
+            if p is None:
+                return None
+            if isinstance(p, dict) and "value" in p:
+                return p["value"]
+            return p
+
+        items = []
+        for r in result.get("results", []):
+            props = r.get("properties") or {}
+            if not isinstance(props, dict):
+                continue
+            owner_id = _v(props, "hubspot_owner_id")
+            # Use Staff object "name" property; fallback to owner ID
+            display_name = _v(props, "name") or owner_id or "—"
+            items.append({
+                "id": r.get("id"),
+                "hubspot_owner_id": owner_id,
+                "name": display_name,
+                "lead_teams": _v(props, "lead_teams"),
+                "availability": _v(props, "availability"),
+                "pause_leads": _v(props, "pause_leads"),
+                "max_pip_leads": _v(props, "max_pip_leads"),
+                "max_inbound_leads": _v(props, "max_inbound_leads"),
+                "max_panther_leads": _v(props, "max_panther_leads"),
+                "max_frosties_leads": _v(props, "max_frosties_leads"),
+                "open_pip_leads_n8n": _v(props, "open_pip_leads_n8n"),
+                "open_inbound_leads_n8n": _v(props, "open_inbound_leads_n8n"),
+                "open_panther_leads": _v(props, "open_panther_leads"),
+                "open_frosties_leads": _v(props, "open_frosties_leads"),
+            })
+        from holidays import is_staff_on_holiday_today
+        for item in items:
+            item["on_holiday_today"] = is_staff_on_holiday_today(str(item["id"]))
+        for i, item in enumerate(items):
+            if i > 0:
+                time.sleep(0.2)
+            mins = _get_call_minutes_last_120(client, item.get("hubspot_owner_id"))
+            item["call_minutes_last_120"] = mins if mins is not None else 0
+        return jsonify({"staff": items})
     except Exception as e:
-        return jsonify({"error": str(e), "owners": []})
+        return jsonify({"error": str(e)}), 500
 
 
-# ---------- Distribute test (dry run) ----------
-_dry_run_status = None
+# --- Holidays (staff blocked dates) ---
+@app.route("/api/holidays", methods=["GET"])
+def api_list_holidays():
+    staff_id = request.args.get("staff_id")
+    try:
+        from holidays import list_holidays
+        holidays = list_holidays(staff_id=staff_id if staff_id else None)
+        return jsonify({"holidays": holidays})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/holidays", methods=["POST"])
+def api_add_holiday():
+    data = request.get_json() or {}
+    staff_id = data.get("staff_id")
+    start_date = data.get("start_date")
+    end_date = data.get("end_date")
+    label = data.get("label", "")
+    if not staff_id:
+        return jsonify({"error": "staff_id required"}), 400
+    if not start_date or not end_date:
+        return jsonify({"error": "start_date and end_date required"}), 400
+    try:
+        from holidays import add_holiday
+        holiday = add_holiday(str(staff_id), start_date, end_date, label)
+        return jsonify(holiday), 201
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/holidays/<holiday_id>", methods=["PATCH"])
+def api_update_holiday(holiday_id):
+    data = request.get_json() or {}
+    try:
+        from holidays import update_holiday
+        updated = update_holiday(
+            holiday_id,
+            start_date=data.get("start_date"),
+            end_date=data.get("end_date"),
+            label=data.get("label"),
+        )
+        if updated is None:
+            return jsonify({"error": "Holiday not found"}), 404
+        return jsonify(updated)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/holidays/<holiday_id>", methods=["DELETE"])
+def api_delete_holiday(holiday_id):
+    try:
+        from holidays import delete_holiday
+        if delete_holiday(holiday_id):
+            return jsonify({"ok": True}), 200
+        return jsonify({"error": "Holiday not found"}), 404
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/staff/field-options/<property_name>", methods=["GET"])
+def get_staff_field_options(property_name):
+    """Return dropdown options for a Staff object property (e.g. pause_leads) from HubSpot schema."""
+    if not HUBSPOT_STAFF_OBJECT_ID:
+        return jsonify({"options": []}), 200
+    if property_name != "pause_leads":
+        return jsonify({"options": []}), 200
+    try:
+        client = get_client()
+        schema = client.get_custom_object_property(HUBSPOT_STAFF_OBJECT_ID, property_name)
+        raw = schema.get("options") or []
+        options = [
+            {"value": o.get("value", ""), "label": o.get("label", o.get("value", ""))}
+            for o in raw
+            if isinstance(o, dict)
+        ]
+        return jsonify({"options": options})
+    except Exception as e:
+        app.logger.warning("Failed to fetch pause_leads options: %s", e)
+        return jsonify({"options": []}), 200
+
+
+@app.route("/api/staff/<object_id>", methods=["PATCH"])
+def patch_staff(object_id):
+    from config import HUBSPOT_STAFF_OBJECT_ID
+    data = request.get_json() or {}
+    availability = data.get("availability")
+    pause_leads = data.get("pause_leads")
+    add_team = data.get("add_team")
+    remove_team = data.get("remove_team")
+    try:
+        client = get_client()
+        if add_team is not None or remove_team is not None:
+            team_val = add_team if add_team is not None else remove_team
+            team_val = str(team_val).strip()
+            if not team_val:
+                return jsonify({"error": "add_team/remove_team cannot be empty"}), 400
+            current = client.get_custom_object(
+                HUBSPOT_STAFF_OBJECT_ID,
+                object_id,
+                properties=["lead_teams"],
+            )
+            props = current.get("properties") or {}
+            raw = props.get("lead_teams")
+            if isinstance(raw, dict) and "value" in raw:
+                raw = raw["value"]
+            current_teams = [t.strip() for t in (raw or "").split(";") if t.strip()]
+            if add_team is not None:
+                if team_val in current_teams:
+                    return jsonify({"ok": True, "message": "already in team"})
+                new_teams = current_teams + [team_val]
+            else:
+                new_teams = [t for t in current_teams if t != team_val]
+            new_value = "; ".join(new_teams)
+            client.patch_custom_object(
+                HUBSPOT_STAFF_OBJECT_ID,
+                object_id,
+                {"lead_teams": new_value},
+            )
+            return jsonify({"ok": True})
+        if availability is not None:
+            client.patch_custom_object(
+                HUBSPOT_STAFF_OBJECT_ID,
+                object_id,
+                {"availability": str(availability)},
+            )
+            return jsonify({"ok": True})
+        if pause_leads is not None:
+            client.patch_custom_object(
+                HUBSPOT_STAFF_OBJECT_ID,
+                object_id,
+                {"pause_leads": str(pause_leads)},
+            )
+            return jsonify({"ok": True})
+        return jsonify({"error": "provide availability, pause_leads, add_team, or remove_team"}), 400
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# --- Distribute: test run (all active staff, dry-run only) and single-owner (contact-based) ---
+# Dry run can take a long time with many staff; run in background and poll for result
+_dry_run_status = "idle"  # idle | running | done | error
+_dry_run_result = None
+_dry_run_error = None
 _dry_run_lock = threading.Lock()
 
 
-@app.route("/api/distribute/test", methods=["POST"])
-@login_required
-def api_distribute_test():
-    global _dry_run_status
-    with _dry_run_lock:
-        if _dry_run_status == "running":
-            return jsonify({"status": "already_running"})
-        _dry_run_status = "running"
+def _run_dry_run_background() -> None:
+    """Run dry run in background; store result or error when done."""
+    global _dry_run_status, _dry_run_result, _dry_run_error
     try:
-        result = run_dry_run()
+        from distribution_engine import run_distribution_for_all_active
+        result = run_distribution_for_all_active(dry_run=True)
         with _dry_run_lock:
-            _dry_run_status = {"status": "done", "result": result}
-        # Frontend accepts full result in response too
-        return jsonify(result)
+            _dry_run_result = result
+            _dry_run_error = None
+            _dry_run_status = "done"
     except Exception as e:
         with _dry_run_lock:
-            _dry_run_status = {"status": "error", "error": str(e)}
-        return jsonify({"error": str(e)}), 500
-    finally:
-        with _dry_run_lock:
-            if _dry_run_status == "running":
-                _dry_run_status = None
+            _dry_run_result = None
+            _dry_run_error = str(e)
+            _dry_run_status = "error"
 
 
-@app.route("/api/distribute/test/status")
-@login_required
-def api_distribute_test_status():
+@app.route("/api/distribute/test", methods=["POST"])
+def distribute_test():
+    """Start dry run in background; returns immediately to avoid request timeout."""
+    global _dry_run_status, _dry_run_result, _dry_run_error
     with _dry_run_lock:
-        s = _dry_run_status
-    if s is None:
-        return jsonify({"status": "done", "result": None})
-    if s == "running":
-        return jsonify({"status": "running"})
-    if isinstance(s, dict):
-        return jsonify(s)
-    return jsonify({"status": "done", "result": None})
+        if _dry_run_status == "running":
+            return jsonify({"status": "already_running"}), 200
+        _dry_run_status = "running"
+        _dry_run_result = None
+        _dry_run_error = None
+    thread = threading.Thread(target=_run_dry_run_background, daemon=True, name="dry-run")
+    thread.start()
+    return jsonify({"status": "started"})
 
 
-# ---------- Run ----------
+@app.route("/api/distribute/test/status", methods=["GET"])
+def distribute_test_status():
+    """Poll for dry run result (status: idle | running | done | error; result/error when done/error)."""
+    with _dry_run_lock:
+        status = _dry_run_status
+        result = _dry_run_result
+        error = _dry_run_error
+    out = {"status": status}
+    if result is not None:
+        out["result"] = result
+    if error is not None:
+        out["error"] = error
+    return jsonify(out)
+
+
+@app.route("/api/distribute", methods=["POST"])
+def distribute():
+    data = request.get_json() or {}
+    contact_id = data.get("contactId") or data.get("contact_id")
+    dry_run = request.args.get("dry_run", "true").lower() in ("true", "1", "yes")
+    if not contact_id:
+        return jsonify({"error": "contactId required"}), 400
+    try:
+        from distribution_engine import run_distribution
+        result = run_distribution(str(contact_id), dry_run=dry_run)
+        if not dry_run and result.get("planned_assignments"):
+            assignments = result["planned_assignments"]
+            n = len(assignments)
+            details = {
+                "trigger_contact_id": contact_id,
+                "assignments_count": n,
+                "assignments": [
+                    {"contact_id": a.get("contact_id"), "owner_id": a.get("owner_id"), "team": a.get("team")}
+                    for a in assignments[:20]
+                ],
+            }
+            _log_activity("assign", f"Assigned {n} contact(s) for contact {contact_id}", details)
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# Ensure API errors never return HTML (so frontend never sees "Unexpected token '<'" from our app)
+@app.errorhandler(500)
+def api_500_json(e):
+    if request.path.startswith("/api/"):
+        return jsonify({
+            "error": "An unexpected error occurred. Please try again.",
+            "updated": 0,
+            "errors": [],
+        }), 500
+    raise e  # non-API: let Flask's default 500 response run
+
+
+# --- Serve frontend ---
+@app.route("/")
+def index():
+    folder = app.static_folder or ""
+    index_path = os.path.join(folder, "index.html")
+    if folder and os.path.isfile(index_path):
+        return send_from_directory(folder, "index.html")
+    return "<p>Kinly Lead Distribution API. Dashboard not found (missing frontend/index.html).</p>"
+
+
+@app.route("/<path:filename>")
+def frontend_static(filename):
+    """Serve frontend assets (style.css, app.js) from frontend/."""
+    folder = app.static_folder or ""
+    if not folder:
+        return jsonify({"error": "Not found"}), 404
+    safe_path = os.path.normpath(filename)
+    if safe_path.startswith("..") or os.path.isabs(safe_path):
+        return jsonify({"error": "Not found"}), 404
+    path = os.path.join(folder, safe_path)
+    if not os.path.isfile(path):
+        return jsonify({"error": "Not found"}), 404
+    return send_from_directory(folder, safe_path)
+
+
+def _refresh_loop() -> None:
+    """Background loop: wait 6 minutes, run periodic refresh, repeat."""
+    time.sleep(60)  # First run after 1 minute so startup isn't slammed
+    while True:
+        try:
+            run_periodic_refresh()
+        except Exception as e:
+            _log.exception("Refresh loop error: %s", e)
+        time.sleep(REFRESH_INTERVAL_SECONDS)
+
+
+_refresh_thread = threading.Thread(target=_refresh_loop, daemon=True, name="kinly-refresh")
+_refresh_thread.start()
+
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5001))
-    app.run(host="0.0.0.0", port=port, debug=os.environ.get("FLASK_DEBUG") == "1")
+    import os
+    port = int(os.getenv("PORT", 5001))
+    debug = os.getenv("FLASK_DEBUG", "").lower() in ("1", "true", "yes")
+    app.run(host="0.0.0.0", port=port, debug=debug)

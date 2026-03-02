@@ -4,109 +4,264 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Sign in – Kinly Lead Distribution</title>
-  <link rel="stylesheet" href="/style.css" />
+  <link rel="stylesheet" href="/style.css?v=login2" />
+  <style>
+    /* Critical: force login page to be centred (works even if style.css is cached) */
+    body.login-page {
+      min-height: 100vh;
+      display: flex !important;
+      align-items: center !important;
+      justify-content: center !important;
+      padding: 2rem 1rem;
+      margin: 0;
+      background: linear-gradient(160deg, #e8f4f8 0%, #d0e8ef 50%, #d8edf2 100%);
+      box-sizing: border-box;
+    }
+    body.login-page .login-page__center {
+      width: 100%;
+      max-width: 400px;
+      margin: 0 auto;
+      text-align: center;
+    }
+    body.login-page .login-page__header { margin-bottom: 1.75rem; }
+    body.login-page .login-page__logo {
+      display: block;
+      margin: 0 auto 0.75rem;
+      height: 44px;
+      width: auto;
+      max-width: 160px;
+      object-fit: contain;
+    }
+    body.login-page .login-page__subtitle { margin: 0; font-size: 1.1rem; font-weight: 600; color: #0f172a; }
+    body.login-page .login-page__hint { margin: 0.35rem 0 0; font-size: 0.9rem; color: #64748b; }
+    body.login-page .login-page__main { text-align: left; }
+    body.login-page .login-page__card {
+      padding: 1.75rem;
+      border-radius: 12px;
+      box-shadow: 0 4px 24px rgba(0, 0, 0, 0.08);
+      background: #fff;
+      border: 1px solid #e2e8f0;
+    }
+  </style>
 </head>
 <body class="login-page">
-  <main class="login-card card">
-    <h1>Lead Distribution</h1>
-    <p class="login-subtitle">Sign in with your email</p>
-    <div id="login-step-email">
-      <form id="login-email-form" class="form">
-        <div class="form-group">
-          <label for="login-email">Email</label>
-          <input type="email" id="login-email" name="email" required placeholder="you@company.com" autocomplete="email" />
-        </div>
-        <button type="submit" class="btn">Send code</button>
+  <div class="login-page__center">
+    <header class="login-page__header">
+      <img src="/images/kinly-logo.png" alt="Kinly" class="login-page__logo" width="140" height="48" />
+      <p class="login-page__subtitle">Lead Distribution</p>
+      <p class="login-page__hint">Sign in to continue</p>
+    </header>
+
+    <main class="login-page__main">
+      <div class="login-page__card card section">
+      <div id="login-loading" class="loading">Loading…</div>
+      <div id="login-error" class="error" hidden></div>
+
+      <!-- Password login -->
+      <form id="login-form-password" class="form" hidden>
+        <label for="password">Password</label>
+        <input id="password" name="password" type="password" autocomplete="current-password" required />
+        <button type="submit" id="login-btn-password" class="btn">Sign in</button>
       </form>
-      <p id="login-email-error" class="error" hidden></p>
-    </div>
-    <div id="login-step-code" hidden>
-      <p class="hint">We sent a code to <strong id="login-email-display"></strong></p>
-      <form id="login-code-form" class="form">
-        <input type="hidden" id="login-email-hidden" name="email" />
-        <div class="form-group">
-          <label for="login-code">Code</label>
-          <input type="text" id="login-code" name="code" required placeholder="000000" autocomplete="one-time-code" maxlength="8" />
+
+      <!-- Email one-time code login -->
+      <div id="login-email-wrap" hidden>
+        <div id="email-step">
+          <form id="form-send-code" class="form">
+            <label for="email">Email address</label>
+            <input id="email" name="email" type="email" autocomplete="email" required placeholder="you@example.com" />
+            <button type="submit" id="btn-send-code" class="btn">Send code</button>
+          </form>
         </div>
-        <button type="submit" class="btn">Sign in</button>
-      </form>
-      <p id="login-code-error" class="error" hidden></p>
-      <button type="button" id="login-back" class="btn btn-secondary">Use a different email</button>
+        <div id="code-step" hidden>
+          <p class="hint" id="code-sent-hint">We sent a 6-digit code to <strong id="code-email"></strong>. Enter it below.</p>
+          <form id="form-verify-code" class="form">
+            <label for="code">Code</label>
+            <input id="code" name="code" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="6" placeholder="000000" required autocomplete="one-time-code" />
+            <button type="submit" id="btn-verify" class="btn">Verify & sign in</button>
+          </form>
+          <p><button type="button" id="btn-back-email" class="tab-link">Use a different email</button></p>
+        </div>
+      </div>
+
+      <!-- Tabs when both methods are available -->
+      <div id="login-tabs" class="login-tabs" hidden>
+        <button type="button" class="login-tab active" data-method="email_code">Email code</button>
+        <button type="button" class="login-tab" data-method="password">Password</button>
+      </div>
     </div>
   </main>
+  </div>
+
   <script>
     (function () {
-      const API = '/api';
-      var stepEmail = document.getElementById('login-step-email');
-      var stepCode = document.getElementById('login-step-code');
-      var emailInput = document.getElementById('login-email');
-      var emailDisplay = document.getElementById('login-email-display');
-      var emailHidden = document.getElementById('login-email-hidden');
-      var codeInput = document.getElementById('login-code');
-      var emailError = document.getElementById('login-email-error');
-      var codeError = document.getElementById('login-code-error');
+      var loading = document.getElementById("login-loading");
+      var errorEl = document.getElementById("login-error");
+      var passwordForm = document.getElementById("login-form-password");
+      var emailWrap = document.getElementById("login-email-wrap");
+      var emailStep = document.getElementById("email-step");
+      var codeStep = document.getElementById("code-step");
+      var codeSentHint = document.getElementById("code-sent-hint");
+      var codeEmailEl = document.getElementById("code-email");
+      var tabs = document.getElementById("login-tabs");
+      var formSendCode = document.getElementById("form-send-code");
+      var formVerifyCode = document.getElementById("form-verify-code");
+      var emailInput = document.getElementById("email");
+      var codeInput = document.getElementById("code");
+      var btnBackEmail = document.getElementById("btn-back-email");
 
-      document.getElementById('login-email-form').addEventListener('submit', function (e) {
-        e.preventDefault();
-        var email = (emailInput.value || '').trim().toLowerCase();
-        if (!email) return;
-        emailError.hidden = true;
-        fetch(API + '/login', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email: email })
+      function showError(msg) {
+        errorEl.textContent = msg || "";
+        errorEl.hidden = !msg;
+      }
+      function hideError() {
+        errorEl.hidden = true;
+      }
+
+      function showMethod(method) {
+        if (method === "password") {
+          passwordForm.hidden = false;
+          emailWrap.hidden = true;
+        } else {
+          passwordForm.hidden = true;
+          emailWrap.hidden = false;
+          codeStep.hidden = true;
+          emailStep.hidden = false;
+        }
+      }
+
+      fetch("/api/auth/methods", { credentials: "same-origin" })
+        .then(function (r) { return r.json(); })
+        .then(function (methods) {
+          loading.hidden = true;
+          var password = methods.password === true;
+          var emailCode = methods.email_code === true;
+          if (emailCode && password) {
+            tabs.hidden = false;
+            emailWrap.hidden = false;
+            passwordForm.hidden = false;
+            document.querySelectorAll(".login-tab").forEach(function (btn) {
+              btn.addEventListener("click", function () {
+                document.querySelectorAll(".login-tab").forEach(function (b) { b.classList.remove("active"); });
+                this.classList.add("active");
+                showMethod(this.getAttribute("data-method"));
+                hideError();
+              });
+            });
+            showMethod("email_code");
+          } else if (emailCode) {
+            emailWrap.hidden = false;
+            passwordForm.hidden = true;
+          } else if (password) {
+            passwordForm.hidden = false;
+            emailWrap.hidden = true;
+          } else {
+            showError("Login is not configured.");
+          }
         })
-          .then(function (r) { return r.json().then(function (d) { return { status: r.status, data: d }; }); })
-          .then(function (res) {
-            if (res.status === 200 && res.data.sent) {
-              emailHidden.value = email;
-              emailDisplay.textContent = email;
-              stepEmail.hidden = true;
-              stepCode.hidden = false;
-              codeInput.value = '';
+        .catch(function () {
+          loading.hidden = true;
+          showError("Could not load sign-in options.");
+        });
+
+      // Password form
+      if (passwordForm) {
+        passwordForm.addEventListener("submit", function (e) {
+          e.preventDefault();
+          hideError();
+          var btn = document.getElementById("login-btn-password");
+          btn.disabled = true;
+          fetch("/api/login", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ password: document.getElementById("password").value }),
+            credentials: "same-origin",
+          })
+            .then(function (res) {
+              if (res.ok) {
+                window.location.href = "/";
+                return;
+              }
+              return res.json().then(function (body) {
+                showError((body && body.error) || "Invalid password.");
+              });
+            })
+            .catch(function () {
+              showError("Sign in failed.");
+            })
+            .finally(function () {
+              btn.disabled = false;
+            });
+        });
+      }
+
+      // Send code
+      formSendCode.addEventListener("submit", function (e) {
+        e.preventDefault();
+        hideError();
+        var btn = document.getElementById("btn-send-code");
+        btn.disabled = true;
+        var email = emailInput.value.trim().toLowerCase();
+        fetch("/api/auth/send-code", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "same-origin",
+          body: JSON.stringify({ email: email }),
+        })
+          .then(function (r) {
+            if (r.ok) {
+              codeEmailEl.textContent = email;
+              emailStep.hidden = true;
+              codeStep.hidden = false;
+              codeInput.value = "";
               codeInput.focus();
-            } else {
-              emailError.textContent = (res.data && res.data.error) ? res.data.error : 'Failed to send code';
-              emailError.hidden = false;
+              return;
             }
+            return r.json().then(function (d) {
+              showError((d && d.error) || "Failed to send code.");
+            });
           })
           .catch(function () {
-            emailError.textContent = 'Network error. Try again.';
-            emailError.hidden = false;
+            showError("Request failed.");
+          })
+          .finally(function () {
+            btn.disabled = false;
           });
       });
 
-      document.getElementById('login-code-form').addEventListener('submit', function (e) {
+      // Verify code
+      formVerifyCode.addEventListener("submit", function (e) {
         e.preventDefault();
-        var email = (emailHidden.value || '').trim();
-        var code = (codeInput.value || '').trim();
-        if (!email || !code) return;
-        codeError.hidden = true;
-        fetch(API + '/login/verify', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email: email, code: code })
+        hideError();
+        var btn = document.getElementById("btn-verify");
+        btn.disabled = true;
+        fetch("/api/auth/verify-code", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "same-origin",
+          body: JSON.stringify({ email: emailInput.value.trim().toLowerCase(), code: codeInput.value.trim() }),
         })
-          .then(function (r) { return r.json().then(function (d) { return { status: r.status, data: d }; }); })
-          .then(function (res) {
-            if (res.status === 200 && res.data.ok) {
-              window.location.href = '/';
-            } else {
-              codeError.textContent = (res.data && res.data.error) ? res.data.error : 'Invalid code';
-              codeError.hidden = false;
+          .then(function (r) {
+            if (r.ok) {
+              window.location.href = "/";
+              return;
             }
+            return r.json().then(function (d) {
+              showError((d && d.error) || "Invalid or expired code.");
+            });
           })
           .catch(function () {
-            codeError.textContent = 'Network error. Try again.';
-            codeError.hidden = false;
+            showError("Verification failed.");
+          })
+          .finally(function () {
+            btn.disabled = false;
           });
       });
 
-      document.getElementById('login-back').addEventListener('click', function () {
-        stepCode.hidden = true;
-        stepEmail.hidden = false;
-        emailError.hidden = true;
-        codeError.hidden = true;
+      btnBackEmail.addEventListener("click", function () {
+        codeStep.hidden = true;
+        emailStep.hidden = false;
+        hideError();
       });
     })();
   </script>

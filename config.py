@@ -1,33 +1,44 @@
-"""Configuration from environment."""
+"""App config from environment."""
 import os
-from dotenv import load_dotenv
 
-load_dotenv()
-
-# HubSpot
-HUBSPOT_ACCESS_TOKEN = os.getenv("HUBSPOT_ACCESS_TOKEN", "").strip()
-HUBSPOT_STAFF_OBJECT_ID = os.getenv("HUBSPOT_STAFF_OBJECT_ID", "").strip()
-HUBSPOT_LEAD_TEAM_OBJECT_ID = os.getenv("HUBSPOT_LEAD_TEAM_OBJECT_ID", "").strip()
+HUBSPOT_ACCESS_TOKEN = os.getenv("HUBSPOT_ACCESS_TOKEN", "")
+HUBSPOT_STAFF_OBJECT_ID = os.getenv("HUBSPOT_STAFF_OBJECT_ID", "2-194632537")
+HUBSPOT_LEAD_TEAM_OBJECT_ID = os.getenv("HUBSPOT_LEAD_TEAM_OBJECT_ID", "").strip() or None
 HUBSPOT_LEAD_PIPELINE_STAGE = os.getenv("HUBSPOT_LEAD_PIPELINE_STAGE", "new-stage-id")
 
-# Session / auth
-SESSION_SECRET = os.getenv("SESSION_SECRET", "").strip()
-if not SESSION_SECRET:
-    SESSION_SECRET = os.urandom(32).hex()
+# Optional: if set, webhook requests must include this in X-Webhook-Secret header or ?secret= query
+WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "").strip() or None
 
-# Email (SendGrid: SMTP_USER is "apikey", SMTP_PASSWORD is API key)
-SMTP_HOST = os.getenv("SMTP_HOST", "smtp.sendgrid.net")
-SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
-SMTP_USER = os.getenv("SMTP_USER", "").strip()
-SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "").strip()
-EMAIL_FROM = os.getenv("EMAIL_FROM", "").strip()
-ALLOWED_EMAILS = [
-    e.strip().lower()
-    for e in os.getenv("ALLOWED_EMAILS", "").split(",")
-    if e.strip()
-]
+# Login: when SESSION_SECRET is set and at least one auth method is configured, dashboard requires login
+SESSION_SECRET = os.getenv("SESSION_SECRET", "").strip() or None
+# Password login: bcrypt hash (generate with: python -c "import bcrypt; print(bcrypt.hashpw(b'yourpassword', bcrypt.gensalt()).decode())")
+APP_PASSWORD_HASH = os.getenv("APP_PASSWORD_HASH", "").strip() or None
 
-# Data paths (file-based stores when no DB)
-DATA_DIR = os.getenv("DATA_DIR", os.path.join(os.path.dirname(__file__), "data"))
-HOLIDAYS_FILE = os.path.join(DATA_DIR, "holidays.json")
-ACTIVITY_LOG_FILE = os.path.join(DATA_DIR, "activity_log.json")
+# Passwordless login: one-time code to email. Set SMTP_* and EMAIL_FROM to enable.
+SMTP_HOST = os.getenv("SMTP_HOST", "").strip() or None
+try:
+    SMTP_PORT = int(os.getenv("SMTP_PORT", "587").strip() or "587")
+except (ValueError, AttributeError):
+    SMTP_PORT = 587
+SMTP_USER = os.getenv("SMTP_USER", "").strip() or None
+SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "").strip() or None
+EMAIL_FROM = os.getenv("EMAIL_FROM", "").strip() or None
+# Optional: comma-separated list; if set, only these addresses can request a code
+ALLOWED_EMAILS_STR = os.getenv("ALLOWED_EMAILS", "").strip() or None
+ALLOWED_EMAILS = [e.strip().lower() for e in (ALLOWED_EMAILS_STR or "").split(",") if e.strip()] or None
+
+# Lead type to lead_priority mapping (contacts)
+LEAD_PRIORITY_BY_TYPE = {
+    "Inbound Lead Team": ["High", "High (Applied Before)", "High (Callback)"],
+    "PIP Lead Team": ["PIP"],
+    "Panther Lead Team": ["Panther"],
+    "Frosties Lead Team": ["Frosties"],
+}
+
+# hs_lead_type values in Leads object
+HS_LEAD_TYPES = {
+    "inbound": "Inbound Lead",
+    "pip": "PIP Lead",
+    "frosties": "Frosties lead",
+    "panther": "Panther Lead",
+}

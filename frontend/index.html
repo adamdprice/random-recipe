@@ -32,9 +32,7 @@
         </span>
       </div>
       <nav class="header-nav" aria-label="Main">
-        <button type="button" class="tab active" data-tab="staff-mgmt">Staff Management</button>
-        <button type="button" class="tab" data-tab="call-activity">Call activity</button>
-        <button type="button" class="tab" data-tab="team-mgmt">Team Management</button>
+        <button type="button" class="tab active" data-tab="config">Configuration</button>
         <button type="button" class="tab" data-tab="dryrun">Test run</button>
         <button type="button" class="tab" data-tab="data">Data</button>
       </nav>
@@ -47,16 +45,38 @@
       <img src="/images/kinly-logo.png" alt="Kinly" class="page-logo-img" width="360" height="104" />
     </div>
 
-    <section id="staff-mgmt" class="panel active">
-      <div class="card section" id="unallocated-gauges-section">
+    <section id="config" class="panel active">
+      <div class="card section">
         <div class="section-head">
-          <h2>Unallocated leads</h2>
+          <h2>Lead Teams</h2>
           <span class="squiggle" aria-hidden="true"></span>
         </div>
-        <p class="hint">Unallocated contacts per team. 200+ is maximum (red).</p>
-        <div id="unallocated-gauges-loading" class="loading">Loading…</div>
-        <div id="unallocated-gauges-error" class="error" hidden></div>
-        <div id="unallocated-gauges" class="unallocated-gauges" hidden></div>
+        <p class="hint">Set the maximum number of leads per team. Changes sync to HubSpot and to staff in that team.</p>
+        <div id="lead-teams-loading" class="loading">Loading…</div>
+        <div id="lead-teams-error" class="error" hidden></div>
+        <div class="table-wrap">
+          <table id="lead-teams-table" class="table" hidden>
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th title="Contacts with no owner matching this team’s lead_priority">Unallocated</th>
+                <th>Max leads</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <p id="lead-teams-empty" class="empty" hidden>No lead teams or object ID not set.</p>
+      </div>
+
+      <div class="card section" id="call-activity-section">
+        <div class="section-head">
+          <h2>Call activity (last 2 hours)</h2>
+          <span class="squiggle" aria-hidden="true"></span>
+        </div>
+        <p class="hint">Most active call-wise at the top. Red = fewer minutes on calls, green = more.</p>
+        <div id="call-activity-chart" class="call-activity-chart"></div>
       </div>
 
       <div class="card section">
@@ -66,10 +86,6 @@
             <span class="squiggle" aria-hidden="true"></span>
           </div>
           <div class="section-actions">
-            <button type="button" id="create-staff-btn" class="btn btn-icon-with-text" title="Create staff member" aria-label="Create staff member">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M19 8v6M22 11h-6"/></svg>
-              <span>Create staff member</span>
-            </button>
             <button type="button" id="holidays-btn" class="btn btn-icon-with-text" title="Holidays" aria-label="Holidays">
               <svg class="icon-holiday" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M8 2v4M16 2v4M3 10h18M5 4h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z"/><path d="M8 14h.01M12 14h.01M16 14h.01M8 18h.01M12 18h.01M16 18h.01"/></svg>
               <span>Holidays</span>
@@ -132,44 +148,6 @@
             </div>
           </div>
         </div>
-      </div>
-    </section>
-
-    <section id="call-activity" class="panel" hidden>
-      <div class="card section" id="call-activity-section">
-        <div class="section-head">
-          <h2>Call activity (last 2 hours)</h2>
-          <span class="squiggle" aria-hidden="true"></span>
-        </div>
-        <p class="hint">Most active call-wise at the top. Red = fewer minutes on calls, green = more.</p>
-        <div id="call-activity-loading" class="loading" hidden>Loading…</div>
-        <div id="call-activity-chart" class="call-activity-chart"></div>
-      </div>
-    </section>
-
-    <section id="team-mgmt" class="panel" hidden>
-      <div class="card section">
-        <div class="section-head">
-          <h2>Lead Teams</h2>
-          <span class="squiggle" aria-hidden="true"></span>
-        </div>
-        <p class="hint">Set the maximum number of leads per team. Changes sync to HubSpot and to staff in that team.</p>
-        <div id="lead-teams-loading" class="loading">Loading…</div>
-        <div id="lead-teams-error" class="error" hidden></div>
-        <div class="table-wrap">
-          <table id="lead-teams-table" class="table" hidden>
-            <thead>
-              <tr>
-                <th>Name</th>
-                <th title="Contacts with no owner matching this team's lead_priority">Unallocated</th>
-                <th>Max leads</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody></tbody>
-          </table>
-        </div>
-        <p id="lead-teams-empty" class="empty" hidden>No lead teams or object ID not set.</p>
       </div>
     </section>
 
@@ -257,43 +235,6 @@
       <div class="modal-actions" id="holidays-modal-actions">
         <button type="button" id="holiday-add-btn" class="btn">Add holiday</button>
         <button type="button" class="btn btn-secondary holidays-close">Close</button>
-      </div>
-    </div>
-  </div>
-
-  <div id="create-staff-modal" class="modal" hidden aria-modal="true" role="dialog" aria-labelledby="create-staff-modal-title">
-    <div class="modal-backdrop" data-close="create-staff-modal"></div>
-    <div class="modal-dialog card holidays-dialog">
-      <h2 id="create-staff-modal-title" class="section-head">Create staff member</h2>
-      <p class="hint">Each HubSpot user can have only one staff member. Select a user who does not have one yet.</p>
-      <div id="create-staff-loading" class="loading" hidden>Loading users…</div>
-      <div id="create-staff-form-wrap" class="holiday-form-wrap" hidden>
-        <form id="create-staff-form" class="form">
-          <input type="hidden" id="create-staff-owner" name="hubspot_owner_id" value="" />
-          <div class="form-group">
-            <label for="create-staff-search">Search users</label>
-            <input type="text" id="create-staff-search" class="create-staff-search-input" placeholder="Type to search, then click a user…" autocomplete="off" />
-          </div>
-          <div class="form-group">
-            <label class="create-staff-list-label">Choose a user</label>
-            <div id="create-staff-user-list" class="create-staff-user-list" role="listbox" aria-label="HubSpot users"></div>
-            <p id="create-staff-no-match" class="create-staff-no-match" hidden>No matching users. Try a different search.</p>
-          </div>
-          <div id="create-staff-teams-wrap" class="form-group create-staff-teams-wrap" hidden>
-            <label class="create-staff-list-label">Assign teams</label>
-            <p class="hint">Click a team to add or remove before creating.</p>
-            <div id="create-staff-teams" class="create-staff-teams"></div>
-          </div>
-          <p id="create-staff-error" class="create-staff-error" hidden role="alert"></p>
-          <div class="form-actions">
-            <button type="submit" id="create-staff-submit" class="btn">Create staff member</button>
-            <button type="button" id="create-staff-cancel" class="btn btn-secondary">Cancel</button>
-          </div>
-        </form>
-      </div>
-      <p id="create-staff-empty" class="empty" hidden>All HubSpot users already have a staff member.</p>
-      <div class="modal-actions">
-        <button type="button" class="btn btn-secondary create-staff-close">Close</button>
       </div>
     </div>
   </div>

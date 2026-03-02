@@ -1,202 +1,223 @@
-"""HubSpot API client: owners, Staff and Lead Team custom objects."""
+"""
+Minimal HubSpot API client for Kinly lead distribution.
+Handles contacts, leads, and custom objects (Staff, Lead Teams).
+"""
+import os
+import time
 import requests
-from typing import Any, Dict, List, Optional
-
-from config import (
-    HUBSPOT_ACCESS_TOKEN,
-    HUBSPOT_STAFF_OBJECT_ID,
-    HUBSPOT_LEAD_TEAM_OBJECT_ID,
-)
-
-BASE = "https://api.hubapi.com"
+from typing import Any, Optional
 
 
-def _headers() -> Dict[str, str]:
-    return {
-        "Authorization": f"Bearer {HUBSPOT_ACCESS_TOKEN}",
-        "Content-Type": "application/json",
-    }
+class HubSpotClient:
+    BASE = "https://api.hubapi.com"
 
+    def __init__(self, access_token: Optional[str] = None):
+        self.access_token = access_token or os.getenv("HUBSPOT_ACCESS_TOKEN")
+        if not self.access_token:
+            raise ValueError("HUBSPOT_ACCESS_TOKEN is required")
+        self._session = requests.Session()
+        self._session.headers.update({
+            "Authorization": f"Bearer {self.access_token}",
+            "Content-Type": "application/json",
+        })
 
-def _get(url: str, params: Optional[Dict] = None) -> Dict[str, Any]:
-    r = requests.get(url, headers=_headers(), params=params or {}, timeout=30)
-    r.raise_for_status()
-    return r.json()
+    def _request(
+        self,
+        method: str,
+        path: str,
+        json: Optional[dict] = None,
+        params: Optional[dict] = None,
+    ) -> dict:
+        url = f"{self.BASE}{path}" if path.startswith("/") else f"{self.BASE}/{path}"
+        last_error = None
+        for attempt in range(4):
+            try:
+                r = self._session.request(method, url, json=json, params=params, timeout=30)
+                r.raise_for_status()
+                if r.text:
+                    return r.json()
+                return {}
+            except requests.HTTPError as e:
+                last_error = e
+                if e.response is not None and e.response.status_code == 429 and attempt < 3:
+                    time.sleep(2.0 ** (attempt + 1))
+                    continue
+                raise
+        if last_error is not None:
+            raise last_error
+        return {}
 
+    # --- Contacts ---
+    def get_contact(self, contact_id: str, properties: Optional[list[str]] = None) -> dict:
+        props = properties or ["hubspot_owner_id", "lead_priority", "assign_lead", "createdate"]
+        params = {"properties": ",".join(props)}
+        return self._request("GET", f"/crm/v3/objects/contacts/{contact_id}", params=params)
 
-def _post(url: str, json: Dict[str, Any]) -> Dict[str, Any]:
-    r = requests.post(url, headers=_headers(), json=json, timeout=30)
-    r.raise_for_status()
-    return r.json()
+    def patch_contact(self, contact_id: str, properties: dict) -> dict:
+        return self._request(
+            "PATCH",
+            f"/crm/v3/objects/contacts/{contact_id}",
+            json={"properties": properties},
+        )
 
-
-def _patch(url: str, json: Dict[str, Any]) -> Dict[str, Any]:
-    r = requests.patch(url, headers=_headers(), json=json, timeout=30)
-    r.raise_for_status()
-    return r.json()
-
-
-def _delete(url: str) -> None:
-    r = requests.delete(url, headers=_headers(), timeout=30)
-    r.raise_for_status()
-
-
-def list_owners() -> List[Dict[str, Any]]:
-    """Return list of HubSpot owners (id, email, firstName, lastName)."""
-    if not HUBSPOT_ACCESS_TOKEN:
-        return []
-    out: List[Dict[str, Any]] = []
-    url = f"{BASE}/crm/v3/owners/"
-    params: Dict[str, Any] = {"limit": 100}
-    while True:
-        data = _get(url, params)
-        for r in (data.get("results") or []):
-            out.append({
-                "id": str(r.get("id", "")),
-                "email": (r.get("email") or "").strip(),
-                "firstName": (r.get("firstName") or "").strip(),
-                "lastName": (r.get("lastName") or "").strip(),
-            })
-        after = (data.get("paging") or {}).get("next", {}).get("after")
-        if not after:
-            break
-        params = {"limit": 100, "after": after}
-    return out
-
-
-def search_custom_objects(object_type_id: str, properties: List[str], filters: Optional[List[Dict]] = None) -> List[Dict[str, Any]]:
-    """Search custom objects. object_type_id e.g. '2-194632537'."""
-    if not HUBSPOT_ACCESS_TOKEN:
-        return []
-    url = f"{BASE}/crm/v3/objects/{object_type_id}/search"
-    body: Dict[str, Any] = {"properties": properties}
-    if filters:
-        body["filterGroups"] = [{"filters": filters}]
-    results: List[Dict[str, Any]] = []
-    after = 0
-    limit = 100
-    while True:
-        body["limit"] = limit
-        body["after"] = after
-        data = _post(url, body)
-        for r in (data.get("results") or []):
-            props = r.get("properties") or {}
-            results.append({
-                "id": r.get("id"),
-                **{k: (props.get(k) or "") for k in properties},
-            })
-        after = data.get("after")
-        if after is None:
-            break
-    return results
-
-
-def get_staff_properties() -> List[str]:
-    return [
-        "hubspot_owner_id", "name", "availability", "lead_teams",
-        "pause_leads", "call_minutes_last_120",
-        "open_inbound_leads_n8n", "open_pip_leads_n8n",
-        "open_panther_leads", "open_frosties_leads",
-    ]
-
-
-def get_all_staff() -> List[Dict[str, Any]]:
-    """Fetch all Staff custom object records."""
-    if not HUBSPOT_STAFF_OBJECT_ID:
-        return []
-    props = get_staff_properties()
-    raw = search_custom_objects(HUBSPOT_STAFF_OBJECT_ID, props)
-    return [normalize_staff(r) for r in raw]
-
-
-def normalize_staff(r: Dict[str, Any]) -> Dict[str, Any]:
-    """Normalize staff record for API (id, name, availability, lead_teams, etc.)."""
-    return {
-        "id": r.get("id"),
-        "hubspot_owner_id": (r.get("hubspot_owner_id") or "").strip(),
-        "name": (r.get("name") or r.get("hubspot_owner_id") or "").strip() or None,
-        "availability": (r.get("availability") or "Available").strip(),
-        "lead_teams": (r.get("lead_teams") or "").strip(),
-        "pause_leads": (r.get("pause_leads") or "").strip() or None,
-        "call_minutes_last_120": _num(r.get("call_minutes_last_120")),
-        "open_inbound_leads_n8n": _num(r.get("open_inbound_leads_n8n")),
-        "open_pip_leads_n8n": _num(r.get("open_pip_leads_n8n")),
-        "open_panther_leads": _num(r.get("open_panther_leads")),
-        "open_frosties_leads": _num(r.get("open_frosties_leads")),
-        "on_holiday_today": False,  # filled by app layer from holidays
-    }
-
-
-def _num(v: Any) -> Optional[int]:
-    if v is None or v == "":
-        return None
-    try:
-        return int(float(v))
-    except (TypeError, ValueError):
-        return None
-
-
-def get_staff_by_id(staff_id: str) -> Optional[Dict[str, Any]]:
-    """Fetch a single Staff record by id."""
-    if not HUBSPOT_ACCESS_TOKEN or not HUBSPOT_STAFF_OBJECT_ID:
-        return None
-    url = f"{BASE}/crm/v3/objects/{HUBSPOT_STAFF_OBJECT_ID}/{staff_id}"
-    params = {"properties": ",".join(get_staff_properties())}
-    try:
-        r = _get(url, params)
-        props = r.get("properties") or {}
-        rec = {"id": r.get("id"), **{k: (props.get(k) or "") for k in get_staff_properties()}}
-        return normalize_staff(rec)
-    except Exception:
-        return None
-
-
-def create_custom_object(object_type_id: str, properties: Dict[str, str]) -> Dict[str, Any]:
-    """Create one custom object. Returns created object with id."""
-    url = f"{BASE}/crm/v3/objects/{object_type_id}"
-    body = {"properties": {k: str(v) for k, v in properties.items()}}
-    return _post(url, body)
-
-
-def patch_custom_object(object_type_id: str, object_id: str, properties: Dict[str, str]) -> Dict[str, Any]:
-    """Patch custom object properties."""
-    url = f"{BASE}/crm/v3/objects/{object_type_id}/{object_id}"
-    body = {"properties": {k: str(v) for k, v in properties.items()}}
-    return _patch(url, body)
-
-
-def get_lead_team_properties() -> List[str]:
-    return ["name", "unallocated", "max_leads"]
-
-
-def get_all_lead_teams() -> List[Dict[str, Any]]:
-    """Fetch all Lead Team custom object records."""
-    if not HUBSPOT_LEAD_TEAM_OBJECT_ID:
-        return []
-    props = get_lead_team_properties()
-    raw = search_custom_objects(HUBSPOT_LEAD_TEAM_OBJECT_ID, props)
-    return [
-        {
-            "id": r.get("id"),
-            "name": (r.get("name") or "").strip() or None,
-            "unallocated": _num(r.get("unallocated")),
-            "max_leads": _num(r.get("max_leads")),
+    def search_contacts(
+        self,
+        filter_groups: list[dict],
+        properties: list[str],
+        sorts: Optional[list[dict]] = None,
+        limit: int = 100,
+    ) -> dict:
+        body = {
+            "filterGroups": filter_groups,
+            "properties": properties,
+            "limit": limit,
         }
-        for r in raw
-    ]
+        if sorts:
+            body["sorts"] = sorts
+        return self._request("POST", "/crm/v3/objects/contacts/search", json=body)
 
+    # --- Calls (for temperature gauge: minutes on calls in last N minutes) ---
+    def search_calls(
+        self,
+        filter_groups: list[dict],
+        properties: list[str],
+        limit: int = 100,
+    ) -> dict:
+        return self._request(
+            "POST",
+            "/crm/v3/objects/calls/search",
+            json={
+                "filterGroups": filter_groups,
+                "properties": properties,
+                "limit": limit,
+            },
+        )
 
-def patch_lead_team(team_id: str, max_leads: int) -> Dict[str, Any]:
-    """Update lead team max_leads."""
-    return patch_custom_object(HUBSPOT_LEAD_TEAM_OBJECT_ID, team_id, {"max_leads": str(max_leads)})
+    # --- Leads ---
+    def search_leads(
+        self,
+        filter_groups: list[dict],
+        properties: list[str],
+        limit: int = 200,
+    ) -> dict:
+        return self._request(
+            "POST",
+            "/crm/v3/objects/leads/search",
+            json={
+                "filterGroups": filter_groups,
+                "properties": properties,
+                "limit": limit,
+            },
+        )
 
+    # --- Custom object property schema (for dropdown options) ---
+    def get_custom_object_property(self, object_type_id: str, property_name: str) -> dict:
+        """Get property definition including options for select/enumeration fields."""
+        return self._request(
+            "GET",
+            f"/crm/v3/properties/{object_type_id}/{property_name}",
+        )
 
-def test_connection() -> bool:
-    """Verify HubSpot token works (e.g. list owners)."""
-    if not HUBSPOT_ACCESS_TOKEN:
-        return False
-    try:
-        list_owners()
-        return True
-    except Exception:
-        return False
+    # --- Custom objects (generic) ---
+    def get_custom_object(
+        self,
+        object_type_id: str,
+        object_id: str,
+        properties: Optional[list[str]] = None,
+    ) -> dict:
+        params = {}
+        if properties:
+            params["properties"] = ",".join(properties)
+        return self._request(
+            "GET",
+            f"/crm/v3/objects/{object_type_id}/{object_id}",
+            params=params or None,
+        )
+
+    def search_custom_objects(
+        self,
+        object_type_id: str,
+        filter_groups: list[dict],
+        properties: list[str],
+        limit: int = 100,
+    ) -> dict:
+        return self._request(
+            "POST",
+            f"/crm/v3/objects/{object_type_id}/search",
+            json={
+                "filterGroups": filter_groups,
+                "properties": properties,
+                "limit": limit,
+            },
+        )
+
+    def patch_custom_object(
+        self,
+        object_type_id: str,
+        object_id: str,
+        properties: dict,
+    ) -> dict:
+        return self._request(
+            "PATCH",
+            f"/crm/v3/objects/{object_type_id}/{object_id}",
+            json={"properties": properties},
+        )
+
+    def batch_update_custom_objects(
+        self,
+        object_type_id: str,
+        inputs: list[dict],
+    ) -> dict:
+        """Batch update custom objects. Each input: { "id": str, "properties": dict }."""
+        return self._request(
+            "POST",
+            f"/crm/v3/objects/{object_type_id}/batch/update",
+            json={"inputs": inputs},
+        )
+
+    # --- Owners (for resolving owner ID to name) ---
+    def get_owners(self) -> list:
+        """Fetch all HubSpot owners (id, firstName, lastName, email)."""
+        result = self._request("GET", "/crm/v3/owners", params={"limit": 500})
+        if not isinstance(result, dict):
+            return []
+        return result.get("results", [])
+
+    # --- Staff object helpers ---
+    def get_staff_by_owner_id(
+        self,
+        hubspot_owner_id: str,
+        staff_object_id: str,
+        properties: Optional[list[str]] = None,
+    ) -> dict:
+        default_props = [
+            "hubspot_owner_id",
+            "open_pip_leads_n8n",
+            "open_inbound_leads_n8n",
+            "open_panther_leads",
+            "open_frosties_leads",
+            "max_pip_leads",
+            "max_inbound_leads",
+            "max_panther_leads",
+            "max_frosties_leads",
+            "availability",
+            "lead_teams",
+            "pip_leads_recently_assigned",
+            "inbound_leads_recently_assigned",
+            "panther_leads_recently_assigned",
+            "frosties_leads_recently_assigned",
+        ]
+        props = properties or default_props
+        result = self.search_custom_objects(
+            staff_object_id,
+            filter_groups=[{
+                "filters": [{
+                    "propertyName": "hubspot_owner_id",
+                    "operator": "EQ",
+                    "value": hubspot_owner_id,
+                }],
+            }],
+            properties=props,
+            limit=10,
+        )
+        return result
