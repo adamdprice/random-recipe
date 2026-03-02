@@ -1355,6 +1355,7 @@
       if (tabListBtn) tabListBtn.setAttribute('aria-selected', mode === 'list');
       if (calendarWrap) calendarWrap.hidden = mode !== 'calendar';
       if (listWrap) listWrap.hidden = mode !== 'list';
+      if (mode === 'list') renderList();
     }
 
     if (prevMonthBtn) {
