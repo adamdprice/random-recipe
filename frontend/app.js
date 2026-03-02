@@ -1538,7 +1538,7 @@
   }
 
   tabs();
-  leadTeamsTable();
+  // Load only the default tab (Staff Management) on init; other tabs load when selected
   staffTable();
   renderUnallocatedGauges();
   staffSearch();
@@ -1546,7 +1546,7 @@
   createStaffModal();
   refreshLeadsButton();
   dryRunForm();
-  activityLog();
+  // activityLog() and leadTeamsTable() run when user clicks Data / Team Management tab
 
   // Auto-refresh lead teams (Unallocated, etc.), gauges, and staff + call activity every 5 minutes
   setInterval(function () {
