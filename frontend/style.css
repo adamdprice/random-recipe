@@ -474,6 +474,50 @@ code {
   font-variant-numeric: tabular-nums;
 }
 
+.unallocated-gauges {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 1.5rem;
+  align-items: end;
+  justify-items: center;
+  max-width: 100%;
+}
+
+@media (max-width: 640px) {
+  .unallocated-gauges {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+.gauge-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+  max-width: 140px;
+}
+
+.gauge-title {
+  font-weight: 600;
+  font-size: 1rem;
+  margin-bottom: 0.25rem;
+  color: var(--text);
+}
+
+.gauge-value {
+  font-weight: 700;
+  font-size: 1.5rem;
+  font-variant-numeric: tabular-nums;
+  margin-bottom: 0.25rem;
+  color: var(--text);
+}
+
+.gauge-svg {
+  width: 120px;
+  height: 75px;
+  display: block;
+}
+
 .table tbody tr:last-child td {
   border-bottom: none;
 }
@@ -1133,6 +1177,90 @@ code {
 
 #holidays-modal-actions {
   margin-top: 0.5rem;
+}
+
+/* Create staff modal: search + clickable user list */
+#create-staff-modal .create-staff-search-input {
+  font-size: 1rem;
+  padding: 0.5rem 0.75rem;
+  width: 100%;
+  box-sizing: border-box;
+}
+.create-staff-list-label {
+  display: block;
+  margin-bottom: 0.35rem;
+  font-weight: 500;
+  font-size: 0.95rem;
+}
+.create-staff-user-list {
+  max-height: 10rem;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  font-size: 1rem;
+}
+.create-staff-user-list[aria-label] {
+  padding: 0.25rem 0;
+}
+.create-staff-user-item {
+  display: block;
+  width: 100%;
+  padding: 0.5rem 0.75rem;
+  text-align: left;
+  border: none;
+  background: transparent;
+  font-size: 1rem;
+  font-family: inherit;
+  cursor: pointer;
+  color: var(--text);
+  transition: background 0.15s;
+}
+.create-staff-user-item:hover {
+  background: var(--border);
+}
+.create-staff-user-item.selected {
+  background: var(--accent);
+  color: #fff;
+}
+.create-staff-error {
+  margin: 0.5rem 0;
+  font-size: 0.9rem;
+  color: var(--error);
+}
+
+.create-staff-no-match {
+  margin: 0.5rem 0 0;
+  font-size: 0.9rem;
+  color: var(--text-muted);
+}
+
+.create-staff-teams-wrap .hint {
+  margin: 0 0 0.5rem 0;
+  font-size: 0.85rem;
+}
+.create-staff-teams {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+.create-staff-teams .create-staff-team-btn {
+  padding: 0.4rem 0.65rem;
+  font-size: 0.9rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+.create-staff-teams .create-staff-team-btn:hover {
+  background: var(--border);
+}
+.create-staff-teams .create-staff-team-btn.selected {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
 }
 
 [hidden] {

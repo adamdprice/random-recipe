@@ -151,6 +151,18 @@ class HubSpotClient:
             },
         )
 
+    def create_custom_object(
+        self,
+        object_type_id: str,
+        properties: dict,
+    ) -> dict:
+        """Create a single custom object. Returns the created object (id, properties, etc.)."""
+        return self._request(
+            "POST",
+            f"/crm/v3/objects/{object_type_id}",
+            json={"properties": properties},
+        )
+
     def patch_custom_object(
         self,
         object_type_id: str,

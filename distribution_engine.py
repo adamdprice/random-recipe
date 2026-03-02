@@ -146,7 +146,7 @@ def _run_distribution_for_owner(
     open_frosties = counts["open_frosties_leads"]
     open_panther = counts["open_panther_leads"]
 
-    # 2) Get Staff Member by hubspot_owner_id
+    # 2) Get Staff Member by hubspot_owner_id (if multiple rows, prefer one that is Available)
     staff_result = client.get_staff_by_owner_id(owner_id, HUBSPOT_STAFF_OBJECT_ID)
     results = staff_result.get("results", [])
     if not results:
@@ -159,6 +159,11 @@ def _run_distribution_for_owner(
             "summary": {"assignments_count": 0, "staff_updates_count": 0},
         }
     staff_row = results[0]
+    for r in results:
+        av = _str(_prop_value(r.get("properties") or {}, "availability"))
+        if av != "Unavailable":
+            staff_row = r
+            break
     staff_id = staff_row.get("id")
     staff_props = staff_row.get("properties", {})
 
@@ -182,10 +187,9 @@ def _run_distribution_for_owner(
     alloc_frosties = _ceil_div(max_frosties, team_count)
     total_alloc = alloc_inbound + alloc_pip + alloc_panther + alloc_frosties
 
-    # Cap by total assigned contacts: if owner already has >= total allocation, do not assign more.
-    # This prevents over-assignment when Leads-based open counts undercount (e.g. pipeline stage or type mismatch).
-    total_assigned_contacts = get_total_assigned_contacts_for_owner(client, owner_id)
-    if total_alloc > 0 and total_assigned_contacts >= total_alloc:
+    # At capacity based on total open leads (per-type open counts), not total assigned contacts.
+    total_open_leads = open_inbound + open_pip + open_panther + open_frosties
+    if total_alloc > 0 and total_open_leads >= total_alloc:
         return {
             "owner_id": owner_id,
             "staff_id": staff_id,
@@ -195,7 +199,7 @@ def _run_distribution_for_owner(
             "planned_staff_updates": [],
             "summary": {"assignments_count": 0, "staff_updates_count": 0},
             "at_capacity": True,
-            "total_assigned_contacts": total_assigned_contacts,
+            "total_open_leads": total_open_leads,
             "total_alloc": total_alloc,
         }
 
@@ -218,39 +222,46 @@ def _run_distribution_for_owner(
             },
         )
 
-    # Order and config per type (matches N8N: Inbound, PIP, Frosties, Panther)
+    # Remaining capacity to fill = total allocation minus current total open leads.
+    remaining_capacity = total_alloc - total_open_leads
+    if remaining_capacity <= 0 or not is_available:
+        return {
+            "owner_id": owner_id,
+            "staff_id": staff_id,
+            "staff_name": staff_name,
+            "dry_run": dry_run,
+            "planned_assignments": planned_assignments,
+            "planned_staff_updates": planned_staff_updates,
+            "summary": {"assignments_count": len(planned_assignments), "staff_updates_count": len(planned_staff_updates)},
+        }
+
+    # Build list of teams this owner is in: (team_name, type_key, priorities).
     type_config = [
-        ("Inbound Lead Team", open_inbound, alloc_inbound, "inbound"),
-        ("PIP Lead Team", open_pip, alloc_pip, "pip"),
-        ("Frosties Lead Team", open_frosties, alloc_frosties, "frosties"),
-        ("Panther Lead Team", open_panther, alloc_panther, "panther"),
+        ("Inbound Lead Team", "inbound"),
+        ("PIP Lead Team", "pip"),
+        ("Frosties Lead Team", "frosties"),
+        ("Panther Lead Team", "panther"),
     ]
+    teams_in = [
+        (team_name, type_key, LEAD_PRIORITY_BY_TYPE.get(team_name, []))
+        for team_name, type_key in type_config
+        if in_team(team_name) and LEAD_PRIORITY_BY_TYPE.get(team_name)
+    ]
+    if not teams_in:
+        return {
+            "owner_id": owner_id,
+            "staff_id": staff_id,
+            "staff_name": staff_name,
+            "dry_run": dry_run,
+            "planned_assignments": planned_assignments,
+            "planned_staff_updates": planned_staff_updates,
+            "summary": {"assignments_count": len(planned_assignments), "staff_updates_count": len(planned_staff_updates)},
+        }
 
-    # Running open counts we'll update as we "assign" (for dry_run we only record; for live we PATCH and then update staff)
-    running_open_inbound = open_inbound
-    running_open_pip = open_pip
-    running_open_frosties = open_frosties
-    running_open_panther = open_panther
-
-    # Cap total assignments by contact-based capacity (in case Leads-based open counts undercount)
-    remaining_capacity = total_alloc - total_assigned_contacts
-
-    for team_name, open_count, allocation, type_key in type_config:
-        delta = allocation - open_count
-        if delta <= 0 or not is_available or not in_team(team_name):
-            continue
-        # Do not assign more than remaining total capacity
-        take_at_most = min(delta, remaining_capacity)
-        if take_at_most <= 0:
-            continue
-
-        priorities = LEAD_PRIORITY_BY_TYPE.get(team_name, [])
-        if not priorities:
-            continue
-
-        # Search unassigned contacts (no owner, no assign_lead, lead_priority in priorities, hs_lead_status = Open Lead)
-        search_body = {
-            "filterGroups": [{
+    # Get unallocated contact count per team (Open Lead, no owner, no assign_lead, lead_priority in team's priorities).
+    def count_unallocated(priorities: list) -> int:
+        res = client.search_contacts(
+            filter_groups=[{
                 "filters": [
                     {"propertyName": "hubspot_owner_id", "operator": "NOT_HAS_PROPERTY"},
                     {"propertyName": "assign_lead", "operator": "NOT_HAS_PROPERTY"},
@@ -258,18 +269,43 @@ def _run_distribution_for_owner(
                     {"propertyName": "hs_lead_status", "operator": "EQ", "value": "Open Lead"},
                 ],
             }],
-            "sorts": [{"propertyName": "createdate", "direction": "ASCENDING"}],
-            "limit": max(0, take_at_most),
-            "properties": ["firstname", "lastname", "email", "hubspot_owner_id", "lead_priority", "hs_lead_status", "createdate"],
-        }
+            properties=["hubspot_owner_id"],
+            limit=1,
+        )
+        return res.get("total", 0) or 0
+
+    teams_with_count = [(team_name, type_key, priorities, count_unallocated(priorities)) for team_name, type_key, priorities in teams_in]
+    # Sort by available count descending so we pull from the team with the most leads first.
+    teams_with_count.sort(key=lambda x: x[3], reverse=True)
+
+    # Running open counts we'll update as we assign.
+    running_open_inbound = open_inbound
+    running_open_pip = open_pip
+    running_open_frosties = open_frosties
+    running_open_panther = open_panther
+
+    for team_name, type_key, priorities, _available_count in teams_with_count:
+        if remaining_capacity <= 0:
+            break
+        # When API count is 0 we still try to fetch (HubSpot total can be missing/wrong)
+        take_at_most = min(remaining_capacity, _available_count) if _available_count > 0 else remaining_capacity
+        if take_at_most <= 0:
+            continue
+
         search_res = client.search_contacts(
-            filter_groups=search_body["filterGroups"],
-            properties=search_body["properties"],
-            sorts=search_body["sorts"],
-            limit=search_body["limit"],
+            filter_groups=[{
+                "filters": [
+                    {"propertyName": "hubspot_owner_id", "operator": "NOT_HAS_PROPERTY"},
+                    {"propertyName": "assign_lead", "operator": "NOT_HAS_PROPERTY"},
+                    {"propertyName": "lead_priority", "operator": "IN", "values": priorities},
+                    {"propertyName": "hs_lead_status", "operator": "EQ", "value": "Open Lead"},
+                ],
+            }],
+            sorts=[{"propertyName": "createdate", "direction": "ASCENDING"}],
+            properties=["firstname", "lastname", "email", "hubspot_owner_id", "lead_priority", "hs_lead_status", "createdate"],
+            limit=take_at_most,
         )
         candidates = search_res.get("results", [])
-        # Only allocate each contact once per run (HubSpot API can lag, so same contact may appear unassigned for next owner)
         if assigned_this_run is not None:
             candidates = [c for c in candidates if c.get("id") is not None and str(c.get("id")) not in assigned_this_run]
         contacts_to_assign = candidates[:take_at_most]
@@ -306,7 +342,7 @@ def _run_distribution_for_owner(
             elif type_key == "frosties":
                 running_open_frosties += num_assigned
                 staff_props_update = {"open_frosties_leads": running_open_frosties}
-            else:  # panther
+            else:
                 running_open_panther += num_assigned
                 staff_props_update = {"open_panther_leads": running_open_panther}
 
@@ -358,6 +394,8 @@ def run_distribution(contact_id: str, dry_run: bool = True) -> dict:
 def run_distribution_for_all_active(dry_run: bool = True) -> dict:
     """
     Run distribution for every currently active staff member.
+    Staff are processed in order of who has the fewest open leads first, so those
+    needing more leads get assigned before we run out of unallocated contacts.
     When dry_run=True: no contacts are assigned; returns planned actions.
     When dry_run=False: assigns contacts and updates staff open counts in HubSpot.
     Returns aggregated report: per-owner results and overall summary.
@@ -366,7 +404,15 @@ def run_distribution_for_all_active(dry_run: bool = True) -> dict:
     staff_result = client.search_custom_objects(
         HUBSPOT_STAFF_OBJECT_ID,
         filter_groups=[{"filters": [{"propertyName": "hubspot_owner_id", "operator": "HAS_PROPERTY"}]}],
-        properties=["hubspot_owner_id", "availability", "name"],
+        properties=[
+            "hubspot_owner_id",
+            "availability",
+            "name",
+            "open_inbound_leads_n8n",
+            "open_pip_leads_n8n",
+            "open_panther_leads",
+            "open_frosties_leads",
+        ],
         limit=100,
     )
     rows = staff_result.get("results", []) if isinstance(staff_result, dict) else []
@@ -381,7 +427,15 @@ def run_distribution_for_all_active(dry_run: bool = True) -> dict:
         if not owner_id:
             continue
         name = _str(_prop_value(props, "name")) or None
-        active.append({"owner_id": owner_id, "staff_name": name})
+        total_open = (
+            _num(_prop_value(props, "open_inbound_leads_n8n"))
+            + _num(_prop_value(props, "open_pip_leads_n8n"))
+            + _num(_prop_value(props, "open_panther_leads"))
+            + _num(_prop_value(props, "open_frosties_leads"))
+        )
+        active.append({"owner_id": owner_id, "staff_name": name, "total_open_leads": total_open})
+    # Process staff with the fewest open leads first so they get assigned first.
+    active.sort(key=lambda x: x["total_open_leads"])
 
     results = []
     total_assignments = 0
@@ -399,11 +453,13 @@ def run_distribution_for_all_active(dry_run: bool = True) -> dict:
         total_assignments += len(one.get("planned_assignments", []))
         total_staff_updates += len(one.get("planned_staff_updates", []))
 
+    at_capacity_count = sum(1 for r in results if r.get("at_capacity"))
     return {
         "results": results,
         "summary": {
             "owners_processed": len(results),
             "total_assignments": total_assignments,
             "total_staff_updates": total_staff_updates,
+            "at_capacity_count": at_capacity_count,
         },
     }

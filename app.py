@@ -627,10 +627,16 @@ def run_periodic_refresh() -> None:
         summary = dist_result.get("summary") or {}
         total_assignments = summary.get("total_assignments", 0)
         owners_processed = summary.get("owners_processed", 0)
+        at_capacity_count = summary.get("at_capacity_count", 0)
+        msg = f"Distribution completed: assigned {total_assignments} contact(s) across {owners_processed} staff"
+        if total_assignments == 0 and at_capacity_count:
+            msg += f" ({at_capacity_count} at capacity)"
+        elif total_assignments == 0 and owners_processed:
+            msg += " (none at capacity; possible no unallocated Open Lead contacts)"
         _log_activity(
             "distribution",
-            f"Distribution completed: assigned {total_assignments} contact(s) across {owners_processed} staff",
-            {"source": "scheduled", "total_assignments": total_assignments, "owners_processed": owners_processed},
+            msg,
+            {"source": "scheduled", "total_assignments": total_assignments, "owners_processed": owners_processed, "at_capacity_count": at_capacity_count},
         )
         _log_activity("refresh_done", "Background refresh completed")
     except Exception as e:
@@ -809,6 +815,120 @@ def list_staff():
             mins = _get_call_minutes_last_120(client, item.get("hubspot_owner_id"))
             item["call_minutes_last_120"] = mins if mins is not None else 0
         return jsonify({"staff": items})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/owners", methods=["GET"])
+def list_owners():
+    """Return HubSpot owners (for creating a new staff member)."""
+    try:
+        client = get_client()
+        owners = client.get_owners()
+        out = []
+        for o in owners if isinstance(owners, list) else []:
+            out.append({
+                "id": o.get("id"),
+                "firstName": o.get("firstName") or "",
+                "lastName": o.get("lastName") or "",
+                "email": o.get("email") or "",
+            })
+        return jsonify({"owners": out})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/staff", methods=["POST"])
+def create_staff():
+    """
+    Create a new staff member in HubSpot. One staff per owner.
+    Body: { "hubspot_owner_id": "<owner_id>", "lead_teams": ["Inbound Lead Team", ...] or "Inbound Lead Team;PIP Lead Team" }.
+    Returns the created staff (same shape as list_staff items) so the UI can add without refresh.
+    """
+    from config import HUBSPOT_STAFF_OBJECT_ID
+    data = request.get_json() or {}
+    owner_id = (data.get("hubspot_owner_id") or "").strip()
+    if not owner_id:
+        return jsonify({"error": "hubspot_owner_id is required"}), 400
+    lead_teams_raw = data.get("lead_teams")
+    if isinstance(lead_teams_raw, list):
+        # HubSpot multi-select expects semicolon-separated values (no space)
+        lead_teams_str = ";".join(str(t).strip() for t in lead_teams_raw if t)
+    elif isinstance(lead_teams_raw, str):
+        lead_teams_str = lead_teams_raw.strip().replace("; ", ";")
+    else:
+        lead_teams_str = ""
+    try:
+        client = get_client()
+        # Check if this owner already has a staff member
+        existing = client.get_staff_by_owner_id(str(owner_id), HUBSPOT_STAFF_OBJECT_ID, properties=["hubspot_owner_id"])
+        if (existing.get("results") or []):
+            return jsonify({"error": "This user already has a staff member"}), 400
+        # Resolve owner name
+        owners = client.get_owners()
+        first_name = ""
+        last_name = ""
+        for o in (owners or []):
+            if str(o.get("id")) == str(owner_id):
+                first_name = (o.get("firstName") or "").strip()
+                last_name = (o.get("lastName") or "").strip()
+                break
+        name = " ".join([first_name, last_name]).strip() or str(owner_id)
+        # Create Staff custom object: availability Unavailable, optional teams
+        props = {
+            "hubspot_owner_id": str(owner_id),
+            "name": name,
+            "availability": "Unavailable",
+            "lead_teams": lead_teams_str,
+            "max_inbound_leads": "0",
+            "max_pip_leads": "0",
+            "max_panther_leads": "0",
+            "max_frosties_leads": "0",
+            "open_inbound_leads_n8n": "0",
+            "open_pip_leads_n8n": "0",
+            "open_panther_leads": "0",
+            "open_frosties_leads": "0",
+        }
+        created = client.create_custom_object(HUBSPOT_STAFF_OBJECT_ID, props)
+        staff_id = created.get("id")
+        if not staff_id:
+            return jsonify({"error": "HubSpot did not return the new staff id"}), 500
+        # Ensure lead_teams is set (create often doesn't persist multi-select; PATCH does)
+        lead_teams_warning = None
+        if lead_teams_str:
+            try:
+                client.patch_custom_object(
+                    HUBSPOT_STAFF_OBJECT_ID,
+                    str(staff_id),
+                    {"lead_teams": lead_teams_str},
+                )
+            except Exception as patch_err:
+                logging.exception("PATCH lead_teams after create failed")
+                lead_teams_warning = str(patch_err)
+        # Return same shape as list_staff item so frontend can append (display uses "; ")
+        lead_teams_display = lead_teams_str.replace(";", "; ") if lead_teams_str else ""
+        new_staff = {
+            "id": staff_id,
+            "hubspot_owner_id": str(owner_id),
+            "name": name,
+            "lead_teams": lead_teams_display,
+            "availability": "Unavailable",
+            "pause_leads": None,
+            "max_pip_leads": None,
+            "max_inbound_leads": None,
+            "max_panther_leads": None,
+            "max_frosties_leads": None,
+            "open_pip_leads_n8n": None,
+            "open_inbound_leads_n8n": None,
+            "open_panther_leads": None,
+            "open_frosties_leads": None,
+            "on_holiday_today": False,
+            "call_minutes_last_120": 0,
+        }
+        out = {"staff": new_staff}
+        if lead_teams_warning:
+            out["lead_teams_warning"] = lead_teams_warning
+        return jsonify(out), 201
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 

@@ -1,6 +1,21 @@
 (function () {
   const API = '/api';
   var staffCache = [];
+  var lastPauseLeadsOptions = [];
+
+  function parseJsonResponse(res) {
+    return res.text().then(function (text) {
+      var ct = (res.headers.get('content-type') || '').toLowerCase();
+      if (ct.indexOf('application/json') !== -1) return JSON.parse(text);
+      if (text.trimStart().indexOf('<') === 0) {
+        var onLocalhost = /^localhost$|^127\.0\.0\.1$/.test(window.location.hostname);
+        throw new Error(onLocalhost
+          ? 'Server returned HTML instead of JSON. Open the app from the Flask server (e.g. http://localhost:5001), not from a static file or another dev server.'
+          : 'Something went wrong loading data. Try refreshing the page or signing in again.');
+      }
+      return JSON.parse(text);
+    });
+  }
 
   // Redirect to login on 401 (session expired or not authenticated)
   var origFetch = window.fetch;
@@ -79,8 +94,8 @@
             var id = this.getAttribute('data-staff-id');
             resultsEl.hidden = true;
             input.value = '';
-            var configTab = document.querySelector('.tab[data-tab="config"]');
-            if (configTab) configTab.click();
+            var staffTab = document.querySelector('.tab[data-tab="staff-mgmt"]');
+            if (staffTab) staffTab.click();
             setTimeout(function () {
               var row = document.querySelector('.staff-table tr[data-staff-id="' + id + '"]');
               if (row) {
@@ -141,8 +156,150 @@
         document.getElementById(tab).classList.add('active');
         document.getElementById(tab).hidden = false;
         if (tab === 'data' && typeof activityLog === 'function') activityLog();
+        if (tab === 'team-mgmt') leadTeamsTable();
+        if (tab === 'staff-mgmt') renderUnallocatedGauges();
+        if (tab === 'call-activity') loadCallActivityTab();
       });
     });
+  }
+
+  function loadCallActivityTab() {
+    var loadingEl = document.getElementById('call-activity-loading');
+    var container = document.getElementById('call-activity-chart');
+    var section = document.getElementById('call-activity-section');
+    if (!section || !container) return;
+    if (staffCache && staffCache.length > 0) {
+      renderCallActivityChart(staffCache);
+      return;
+    }
+    if (loadingEl) loadingEl.hidden = false;
+    if (container) container.innerHTML = '';
+    fetch(API + '/staff').then(parseJsonResponse).then(function (data) {
+      if (data.staff) staffCache = data.staff;
+      renderCallActivityChart(staffCache || []);
+    }).catch(function (e) {
+      if (container) container.innerHTML = '<p class="error">' + (e.message || 'Failed to load').replace(/</g, '&lt;') + '</p>';
+    }).finally(function () {
+      if (loadingEl) loadingEl.hidden = true;
+    });
+  }
+
+  var GAUGE_MAX = 200;
+  function renderUnallocatedGauges() {
+    var container = document.getElementById('unallocated-gauges');
+    var loadingEl = document.getElementById('unallocated-gauges-loading');
+    var errEl = document.getElementById('unallocated-gauges-error');
+    if (!container) return;
+    loadingEl.hidden = false;
+    errEl.hidden = true;
+    container.hidden = true;
+    fetch(API + '/lead-teams')
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        loadingEl.hidden = true;
+        if (data.error) {
+          errEl.textContent = data.error;
+          errEl.hidden = false;
+          return;
+        }
+        var teams = data.lead_teams || [];
+        container.innerHTML = '';
+        if (teams.length === 0) {
+          errEl.textContent = data.message || 'No lead teams';
+          errEl.hidden = false;
+          return;
+        }
+        container.hidden = false;
+        teams.forEach(function (t) {
+          var name = t.name || t.id || '—';
+          var shortName = name.replace(/\s*Lead Team\s*$/i, '') || name;
+          var value = t.unallocated != null ? Number(t.unallocated) : 0;
+          var el = document.createElement('div');
+          el.className = 'gauge-wrap';
+          var label = document.createElement('div');
+          label.className = 'gauge-title';
+          label.textContent = shortName;
+          var num = document.createElement('div');
+          num.className = 'gauge-value';
+          num.textContent = value;
+          var svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+          svg.setAttribute('viewBox', '0 0 120 75');
+          svg.setAttribute('class', 'gauge-svg');
+          svg.setAttribute('aria-hidden', 'true');
+          var cx = 60; var cy = 58; var r = 44;
+          var trackWidth = 12;
+          var needleVal = Math.min(value, GAUGE_MAX);
+          var pct = needleVal / GAUGE_MAX;
+          var trackColor;
+          if (pct <= 1/6) trackColor = '#22c55e';
+          else if (pct <= 2/6) trackColor = '#16a34a';
+          else if (pct <= 3/6) trackColor = '#eab308';
+          else if (pct <= 4/6) trackColor = '#ea580c';
+          else if (pct <= 5/6) trackColor = '#dc2626';
+          else trackColor = '#b91c1c';
+          var angleDeg = 180 - pct * 180;
+          var needleRad = (angleDeg * Math.PI) / 180;
+          var xNeedle = cx + r * Math.cos(needleRad);
+          var yNeedle = cy - r * Math.sin(needleRad);
+          var xLeft = cx - r;
+          var yLeft = cy;
+          var xRight = cx + r;
+          var yRight = cy;
+          /* Sweep 1 = arc through bottom in SVG (y-down); we draw arc below baseline so it curves up visually */
+          var sweep = 1;
+          if (pct <= 0.002) {
+            var arcGreyFull = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+            arcGreyFull.setAttribute('d', 'M ' + xLeft + ' ' + yLeft + ' A ' + r + ' ' + r + ' 0 0 ' + sweep + ' ' + xRight + ' ' + yRight);
+            arcGreyFull.setAttribute('fill', 'none');
+            arcGreyFull.setAttribute('stroke', '#d1d5db');
+            arcGreyFull.setAttribute('stroke-width', trackWidth);
+            arcGreyFull.setAttribute('stroke-linecap', 'round');
+            svg.appendChild(arcGreyFull);
+          } else {
+            var arcColored = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+            arcColored.setAttribute('d', 'M ' + xLeft + ' ' + yLeft + ' A ' + r + ' ' + r + ' 0 0 ' + sweep + ' ' + xNeedle + ' ' + yNeedle);
+            arcColored.setAttribute('fill', 'none');
+            arcColored.setAttribute('stroke', trackColor);
+            arcColored.setAttribute('stroke-width', trackWidth);
+            arcColored.setAttribute('stroke-linecap', 'round');
+            svg.appendChild(arcColored);
+            var arcGrey = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+            arcGrey.setAttribute('d', 'M ' + xNeedle + ' ' + yNeedle + ' A ' + r + ' ' + r + ' 0 0 ' + sweep + ' ' + xRight + ' ' + yRight);
+            arcGrey.setAttribute('fill', 'none');
+            arcGrey.setAttribute('stroke', '#d1d5db');
+            arcGrey.setAttribute('stroke-width', trackWidth);
+            arcGrey.setAttribute('stroke-linecap', 'round');
+            svg.appendChild(arcGrey);
+          }
+          var needleLen = r + 4;
+          var nx = cx + needleLen * Math.cos(needleRad);
+          var ny = cy - needleLen * Math.sin(needleRad);
+          var line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+          line.setAttribute('x1', cx);
+          line.setAttribute('y1', cy);
+          line.setAttribute('x2', nx);
+          line.setAttribute('y2', ny);
+          line.setAttribute('stroke', '#111');
+          line.setAttribute('stroke-width', '4');
+          line.setAttribute('stroke-linecap', 'round');
+          var circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+          circle.setAttribute('cx', cx);
+          circle.setAttribute('cy', cy);
+          circle.setAttribute('r', '5');
+          circle.setAttribute('fill', '#111');
+          svg.appendChild(line);
+          svg.appendChild(circle);
+          el.appendChild(label);
+          el.appendChild(num);
+          el.appendChild(svg);
+          container.appendChild(el);
+        });
+      })
+      .catch(function (e) {
+        loadingEl.hidden = true;
+        errEl.textContent = e.message || 'Failed to load unallocated counts';
+        errEl.hidden = false;
+      });
   }
 
   function leadTeamsTable() {
@@ -581,7 +738,8 @@
     const section = document.getElementById('call-activity-section');
     if (!container || !section) return;
     if (!staff || staff.length === 0) {
-      section.hidden = true;
+      section.hidden = false;
+      container.innerHTML = '<p class="empty">No staff data.</p>';
       return;
     }
     section.hidden = false;
@@ -626,8 +784,8 @@
     const inactiveTbody = document.querySelector('#staff-table-inactive tbody');
 
     Promise.all([
-      fetch(API + '/staff').then(function (r) { return r.json(); }),
-      fetch(API + '/staff/field-options/pause_leads').then(function (r) { return r.json(); }),
+      fetch(API + '/staff').then(parseJsonResponse),
+      fetch(API + '/staff/field-options/pause_leads').then(parseJsonResponse),
     ])
       .then(function (results) {
         const data = results[0];
@@ -640,8 +798,8 @@
         }
         const staff = data.staff || [];
         staffCache = staff;
-        renderCallActivityChart(staff);
-        const pauseLeadsOptions = optionsData.options || [];
+        lastPauseLeadsOptions = optionsData.options || [];
+        const pauseLeadsOptions = lastPauseLeadsOptions;
         const active = staff.filter(function (s) {
           return (s.availability || '').toLowerCase() !== 'unavailable';
         });
@@ -660,6 +818,27 @@
         errEl.textContent = e.message || 'Failed to load staff';
         errEl.hidden = false;
       });
+  }
+
+  function renderStaffTableFromCache() {
+    var activeSection = document.getElementById('staff-active-section');
+    var inactiveSection = document.getElementById('staff-inactive-section');
+    var activeTbody = document.querySelector('#staff-table-active tbody');
+    var inactiveTbody = document.querySelector('#staff-table-inactive tbody');
+    if (!activeTbody || !inactiveTbody) return;
+    var staff = staffCache || [];
+    var active = staff.filter(function (s) {
+      return (s.availability || '').toLowerCase() !== 'unavailable';
+    });
+    var inactive = staff.filter(function (s) {
+      return (s.availability || '').toLowerCase() === 'unavailable';
+    });
+    activeTbody.innerHTML = '';
+    inactiveTbody.innerHTML = '';
+    active.forEach(function (s) { renderStaffRow(s, activeTbody, lastPauseLeadsOptions); });
+    inactive.forEach(function (s) { renderStaffRow(s, inactiveTbody, lastPauseLeadsOptions); });
+    activeSection.hidden = active.length === 0;
+    inactiveSection.hidden = inactive.length === 0;
   }
 
   function dryRunForm() {
@@ -856,8 +1035,8 @@
       listEl.hidden = true;
       emptyEl.hidden = true;
       Promise.all([
-        fetch(API + '/staff').then(function (r) { return r.json(); }),
-        fetch(API + '/holidays').then(function (r) { return r.json(); }),
+        fetch(API + '/staff').then(parseJsonResponse),
+        fetch(API + '/holidays').then(parseJsonResponse),
       ]).then(function (results) {
         if (loadingEl) loadingEl.hidden = true;
         listEl.hidden = false;
@@ -1145,18 +1324,234 @@
       });
   }
 
+  function createStaffModal() {
+    var modal = document.getElementById('create-staff-modal');
+    var formWrap = document.getElementById('create-staff-form-wrap');
+    var form = document.getElementById('create-staff-form');
+    var ownerInput = document.getElementById('create-staff-owner');
+    var searchInput = document.getElementById('create-staff-search');
+    var userListEl = document.getElementById('create-staff-user-list');
+    var noMatchEl = document.getElementById('create-staff-no-match');
+    var teamsWrap = document.getElementById('create-staff-teams-wrap');
+    var teamsContainer = document.getElementById('create-staff-teams');
+    var loadingEl = document.getElementById('create-staff-loading');
+    var emptyEl = document.getElementById('create-staff-empty');
+    var errorEl = document.getElementById('create-staff-error');
+    var submitBtn = document.getElementById('create-staff-submit');
+    var availableOwners = [];
+    var selectedTeamsForCreate = [];
+
+    function getDisplayName(o) {
+      return [o.firstName, o.lastName].filter(Boolean).join(' ') || o.email || String(o.id);
+    }
+
+    function renderUserList() {
+      var q = (searchInput && searchInput.value) ? searchInput.value.trim().toLowerCase() : '';
+      var filtered = q
+        ? availableOwners.filter(function (o) {
+            return getDisplayName(o).toLowerCase().indexOf(q) !== -1 || (o.email || '').toLowerCase().indexOf(q) !== -1;
+          })
+        : availableOwners.slice();
+      var selectedId = (ownerInput && ownerInput.value) || '';
+      if (!userListEl) return;
+      userListEl.innerHTML = '';
+      if (noMatchEl) noMatchEl.hidden = filtered.length > 0;
+      filtered.forEach(function (o) {
+        var id = String(o.id);
+        var btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'create-staff-user-item' + (selectedId === id ? ' selected' : '');
+        btn.setAttribute('role', 'option');
+        btn.setAttribute('aria-selected', selectedId === id ? 'true' : 'false');
+        btn.textContent = getDisplayName(o);
+        btn.dataset.ownerId = id;
+        btn.addEventListener('click', function () {
+          ownerInput.value = id;
+          var items = userListEl.querySelectorAll('.create-staff-user-item');
+          items.forEach(function (el) {
+            el.classList.toggle('selected', el.dataset.ownerId === id);
+            el.setAttribute('aria-selected', el.dataset.ownerId === id ? 'true' : 'false');
+          });
+          if (teamsWrap) teamsWrap.hidden = false;
+          renderCreateStaffTeams();
+        });
+        userListEl.appendChild(btn);
+      });
+    }
+
+    function renderCreateStaffTeams() {
+      if (!teamsContainer) return;
+      teamsContainer.innerHTML = '';
+      LEAD_TEAM_KEYS.forEach(function (teamName) {
+        var shortName = shortTeamName(teamName);
+        var isSelected = selectedTeamsForCreate.indexOf(teamName) !== -1;
+        var btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'create-staff-team-btn' + (isSelected ? ' selected' : '');
+        btn.textContent = isSelected ? '\u2713 ' + shortName : '+ ' + shortName;
+        btn.title = isSelected ? 'Remove from ' + teamName : 'Add to ' + teamName;
+        btn.addEventListener('click', function () {
+          var i = selectedTeamsForCreate.indexOf(teamName);
+          if (i === -1) {
+            selectedTeamsForCreate.push(teamName);
+          } else {
+            selectedTeamsForCreate.splice(i, 1);
+          }
+          renderCreateStaffTeams();
+        });
+        teamsContainer.appendChild(btn);
+      });
+    }
+
+    function openModal() {
+      modal.hidden = false;
+      formWrap.hidden = true;
+      emptyEl.hidden = true;
+      availableOwners = [];
+      selectedTeamsForCreate = [];
+      if (searchInput) searchInput.value = '';
+      if (ownerInput) ownerInput.value = '';
+      if (noMatchEl) noMatchEl.hidden = true;
+      if (teamsWrap) teamsWrap.hidden = true;
+      if (userListEl) userListEl.innerHTML = '';
+      if (teamsContainer) teamsContainer.innerHTML = '';
+      if (errorEl) { errorEl.hidden = true; errorEl.textContent = ''; }
+      if (loadingEl) loadingEl.hidden = false;
+      fetch(API + '/owners')
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+          if (loadingEl) loadingEl.hidden = true;
+          if (data.error) {
+            if (userListEl) userListEl.innerHTML = '<p class="create-staff-no-match">Error: ' + (data.error || '').replace(/</g, '&lt;') + '</p>';
+            formWrap.hidden = false;
+            emptyEl.hidden = true;
+            return;
+          }
+          var owners = data.owners || [];
+          var existingOwnerIds = {};
+          staffCache.forEach(function (s) {
+            var id = s.hubspot_owner_id != null ? String(s.hubspot_owner_id) : '';
+            if (id) existingOwnerIds[id] = true;
+          });
+          availableOwners = owners.filter(function (o) {
+            var id = o.id != null ? String(o.id) : '';
+            return id && !existingOwnerIds[id];
+          });
+          availableOwners.sort(function (a, b) {
+            var hasNameA = !!(a.firstName || a.lastName);
+            var hasNameB = !!(b.firstName || b.lastName);
+            if (hasNameA !== hasNameB) return hasNameB ? 1 : -1; // named users first
+            var da = getDisplayName(a).toLowerCase();
+            var db = getDisplayName(b).toLowerCase();
+            return da.localeCompare(db);
+          });
+          if (availableOwners.length === 0) {
+            emptyEl.hidden = false;
+            formWrap.hidden = true;
+          } else {
+            formWrap.hidden = false;
+            emptyEl.hidden = true;
+            renderUserList();
+          }
+        })
+        .catch(function (e) {
+          if (loadingEl) loadingEl.hidden = true;
+          if (userListEl) userListEl.innerHTML = '<p class="create-staff-no-match">Failed to load users.</p>';
+          formWrap.hidden = false;
+          emptyEl.hidden = true;
+        });
+    }
+
+    function closeModal() {
+      modal.hidden = true;
+    }
+
+    if (form) {
+      form.addEventListener('submit', function (e) {
+        e.preventDefault();
+        var ownerId = ownerInput && ownerInput.value ? ownerInput.value.trim() : '';
+        if (!ownerId) {
+          alert('Please choose a user from the list.');
+          return;
+        }
+        submitBtn.disabled = true;
+        submitBtn.textContent = 'Creating…';
+        fetch(API + '/staff', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            hubspot_owner_id: ownerId,
+            lead_teams: selectedTeamsForCreate,
+          }),
+        })
+          .then(function (r) {
+            return r.json().then(function (d) { return { status: r.status, data: d }; }, function () {
+            return { status: r.status, data: { error: 'Request failed (status ' + r.status + ')' } };
+          });
+          })
+          .then(function (res) {
+            submitBtn.disabled = false;
+            submitBtn.textContent = 'Create staff member';
+            if (res.status === 201 && res.data.staff) {
+              if (errorEl) { errorEl.hidden = true; errorEl.textContent = ''; }
+              var newStaff = res.data.staff;
+              newStaff.call_minutes_last_120 = newStaff.call_minutes_last_120 != null ? newStaff.call_minutes_last_120 : 0;
+              newStaff.on_holiday_today = newStaff.on_holiday_today || false;
+              staffCache.push(newStaff);
+              renderStaffTableFromCache();
+              closeModal();
+              staffTable();
+              if (res.data.lead_teams_warning) {
+                alert('Staff member created, but lead teams could not be saved. Please edit the staff member to assign teams.\n\n' + res.data.lead_teams_warning);
+              }
+              return;
+            }
+            var msg = (res.data && res.data.error) ? res.data.error : 'Failed to create staff member';
+            if (errorEl) {
+              errorEl.textContent = msg;
+              errorEl.hidden = false;
+            }
+            alert(msg);
+          })
+          .catch(function (e) {
+            submitBtn.disabled = false;
+            submitBtn.textContent = 'Create staff member';
+            var msg = 'Error: ' + (e.message || 'Request failed');
+            if (errorEl) {
+              errorEl.textContent = msg;
+              errorEl.hidden = false;
+            }
+            alert(msg);
+          });
+      });
+    }
+    if (searchInput) {
+      searchInput.addEventListener('input', renderUserList);
+      searchInput.addEventListener('keyup', renderUserList);
+    }
+    document.getElementById('create-staff-cancel').addEventListener('click', closeModal);
+    document.querySelector('.create-staff-close').addEventListener('click', closeModal);
+    if (modal.querySelector('.modal-backdrop')) {
+      modal.querySelector('.modal-backdrop').addEventListener('click', closeModal);
+    }
+    document.getElementById('create-staff-btn').addEventListener('click', openModal);
+  }
+
   tabs();
   leadTeamsTable();
   staffTable();
+  renderUnallocatedGauges();
   staffSearch();
   holidaysModal();
+  createStaffModal();
   refreshLeadsButton();
   dryRunForm();
   activityLog();
 
-  // Auto-refresh lead teams (Unallocated, etc.) and staff + call activity every 5 minutes
+  // Auto-refresh lead teams (Unallocated, etc.), gauges, and staff + call activity every 5 minutes
   setInterval(function () {
     leadTeamsTable();
     staffTable();
+    renderUnallocatedGauges();
   }, 5 * 60 * 1000);
 })();

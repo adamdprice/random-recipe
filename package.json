@@ -1,15 +1,10 @@
 {
-  "name": "random-recipe",
-  "version": "1.0.0",
-  "description": "Mobile web app – random recipe selector",
+  "name": "kinly-lead-distribution",
   "private": true,
   "scripts": {
-    "start": "serve . -p ${PORT:-3000}"
-  },
-  "engines": {
-    "node": ">=18"
-  },
-  "dependencies": {
-    "serve": "^14.2.0"
+    "railway": "npx @railway/cli",
+    "railway:login": "npx @railway/cli login",
+    "railway:link": "npx @railway/cli link",
+    "deploy": "npx @railway/cli up"
   }
 }
