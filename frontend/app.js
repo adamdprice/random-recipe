@@ -1244,11 +1244,24 @@
         var staff = staffById(h.staff_id);
         var name = staff ? staff.name : ('Staff ' + h.staff_id);
         var labelPart = h.label ? ' – ' + h.label : '';
-        li.innerHTML = '<span><strong>' + escapeHtml(name) + '</strong> <span class="holiday-dates">' + escapeHtml(h.start_date) + ' to ' + escapeHtml(h.end_date) + '</span>' + escapeHtml(labelPart) + '</span><span class="holiday-actions"><button type="button" class="btn btn-secondary holiday-edit" data-id="' + escapeHtml(h.id) + '">Edit</button><button type="button" class="btn btn-secondary holiday-delete" data-id="' + escapeHtml(h.id) + '">Delete</button></span>';
+        var dateRangeText = formatHolidayDateRange(h.start_date, h.end_date);
+        li.innerHTML = '<span><strong>' + escapeHtml(name) + '</strong> <span class="holiday-dates">' + dateRangeText + '</span>' + escapeHtml(labelPart) + '</span><span class="holiday-actions"><button type="button" class="btn btn-secondary holiday-edit" data-id="' + escapeHtml(h.id) + '">Edit</button><button type="button" class="btn btn-secondary holiday-delete" data-id="' + escapeHtml(h.id) + '">Delete</button></span>';
         li.querySelector('.holiday-edit').addEventListener('click', function () { openEditForm(h); });
         li.querySelector('.holiday-delete').addEventListener('click', function () { deleteHoliday(h.id); });
         listEl.appendChild(li);
       });
+    }
+
+    function formatHolidayDateRange(startStr, endStr) {
+      if (!startStr || !endStr) return (startStr || '') + (startStr && endStr ? ' to ' : '') + (endStr || '');
+      var start = new Date(startStr.slice(0, 10));
+      var end = new Date(endStr.slice(0, 10));
+      if (isNaN(start.getTime()) || isNaN(end.getTime())) return escapeHtml(startStr) + ' to ' + escapeHtml(endStr);
+      var opts = { day: 'numeric', month: 'long' };
+      var sameYear = start.getFullYear() === end.getFullYear();
+      var from = start.toLocaleDateString('en-GB', opts);
+      var to = end.toLocaleDateString('en-GB', sameYear ? opts : { day: 'numeric', month: 'long', year: 'numeric' });
+      return from + (sameYear && from === to ? '' : ' – ' + to);
     }
 
     function escapeHtml(s) {
