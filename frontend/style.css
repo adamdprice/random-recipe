@@ -1169,6 +1169,17 @@ code {
   font-weight: 600;
 }
 
+.holiday-staff-selected {
+  margin: 0.35rem 0 0;
+  font-size: 0.9rem;
+  color: var(--text-muted, #666);
+}
+
+#holiday-form-wrap .create-staff-user-list {
+  max-height: 12rem;
+  overflow-y: auto;
+}
+
 .holiday-form-wrap .form-actions {
   display: flex;
   gap: 0.5rem;

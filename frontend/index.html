@@ -232,10 +232,13 @@
         <h3 class="holiday-form-title">Add holiday</h3>
         <form id="holiday-form" class="form">
           <input type="hidden" id="holiday-edit-id" name="holiday_id" value="" />
-          <label>
-            Staff
-            <select id="holiday-staff" name="staff_id" required></select>
-          </label>
+          <input type="hidden" id="holiday-staff" name="staff_id" value="" />
+          <div class="form-group">
+            <label for="holiday-staff-search" class="create-staff-list-label">Staff</label>
+            <input type="text" id="holiday-staff-search" class="create-staff-search-input" placeholder="Search staff by name…" autocomplete="off" aria-label="Search staff" />
+            <div id="holiday-staff-list" class="create-staff-user-list" role="listbox" aria-label="Staff list"></div>
+            <p id="holiday-staff-selected" class="holiday-staff-selected" hidden></p>
+          </div>
           <label>
             From
             <input type="date" id="holiday-start" name="start_date" required />
@@ -250,7 +253,7 @@
           </label>
           <div class="form-actions">
             <button type="button" id="holiday-form-cancel" class="btn btn-secondary">Cancel</button>
-            <button type="submit" class="btn">Confirm</button>
+            <button type="submit" id="holiday-form-submit" class="btn">Confirm</button>
           </div>
         </form>
       </div>

@@ -1002,15 +1002,20 @@
     var formWrap = document.getElementById('holiday-form-wrap');
     var form = document.getElementById('holiday-form');
     var editIdInput = document.getElementById('holiday-edit-id');
-    var staffSelect = document.getElementById('holiday-staff');
+    var staffInput = document.getElementById('holiday-staff');
+    var staffSearchInput = document.getElementById('holiday-staff-search');
+    var staffListEl = document.getElementById('holiday-staff-list');
+    var staffSelectedEl = document.getElementById('holiday-staff-selected');
     var startInput = document.getElementById('holiday-start');
     var endInput = document.getElementById('holiday-end');
     var labelInput = document.getElementById('holiday-label');
     var formTitle = document.querySelector('.holiday-form-title');
     var addBtn = document.getElementById('holiday-add-btn');
     var formCancelBtn = document.getElementById('holiday-form-cancel');
+    var submitBtn = document.getElementById('holiday-form-submit');
     var closeBtn = document.querySelector('.holidays-close');
     var staffCache = [];
+    var staffForSelect = [];
 
     var loadingEl = document.getElementById('holidays-loading');
 
@@ -1023,11 +1028,54 @@
 
     function closeModal() {
       modal.hidden = true;
-      staffTable(); // Refresh staff so on_holiday_today is up to date when toggling availability
+      staffTable();
     }
 
     function staffById(id) {
       return staffCache.find(function (s) { return String(s.id) === String(id); }) || null;
+    }
+
+    function dedupeAndSortStaff(staffList) {
+      var seen = {};
+      var deduped = (staffList || []).filter(function (s) {
+        var key = (s.hubspot_owner_id != null && s.hubspot_owner_id !== '') ? String(s.hubspot_owner_id) : String(s.id);
+        if (seen[key]) return false;
+        seen[key] = true;
+        return true;
+      });
+      deduped.sort(function (a, b) {
+        var na = (a.name || a.id || '').toString().toLowerCase();
+        var nb = (b.name || b.id || '').toString().toLowerCase();
+        return na.localeCompare(nb);
+      });
+      return deduped;
+    }
+
+    function renderStaffList(filter) {
+      if (!staffListEl) return;
+      staffListEl.innerHTML = '';
+      var q = (filter || '').toLowerCase().trim();
+      var list = staffForSelect.filter(function (s) {
+        if (!q) return true;
+        var name = (s.name || s.hubspot_owner_id || '').toString().toLowerCase();
+        return name.indexOf(q) !== -1;
+      });
+      list.forEach(function (s) {
+        var btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'create-staff-user-item' + (staffInput.value === String(s.id) ? ' selected' : '');
+        btn.setAttribute('data-id', s.id);
+        btn.textContent = s.name || s.hubspot_owner_id || 'Staff ' + s.id;
+        btn.addEventListener('click', function () {
+          staffInput.value = s.id;
+          if (staffSelectedEl) {
+            staffSelectedEl.textContent = 'Selected: ' + (s.name || s.id);
+            staffSelectedEl.hidden = false;
+          }
+          renderStaffList(staffSearchInput ? staffSearchInput.value : '');
+        });
+        staffListEl.appendChild(btn);
+      });
     }
 
     function loadStaffAndHolidays() {
@@ -1048,14 +1096,8 @@
           return;
         }
         staffCache = staffData.staff || [];
+        staffForSelect = dedupeAndSortStaff(staffCache);
         var holidays = holidaysData.holidays || [];
-        while (staffSelect.options.length > 1) staffSelect.remove(1);
-        staffCache.forEach(function (s) {
-          var opt = document.createElement('option');
-          opt.value = s.id;
-          opt.textContent = s.name || s.id;
-          staffSelect.appendChild(opt);
-        });
         listEl.innerHTML = '';
         if (holidays.length === 0) {
           emptyEl.hidden = false;
@@ -1090,19 +1132,27 @@
     function openAddForm() {
       formTitle.textContent = 'Add holiday';
       editIdInput.value = '';
-      staffSelect.value = staffCache.length ? staffSelect.options[1].value : '';
+      staffInput.value = '';
+      if (staffSearchInput) staffSearchInput.value = '';
+      if (staffSearchInput) staffSearchInput.disabled = false;
+      if (staffListEl) staffListEl.hidden = false;
+      if (staffSelectedEl) { staffSelectedEl.textContent = ''; staffSelectedEl.hidden = true; }
       startInput.value = '';
       endInput.value = '';
       labelInput.value = '';
-      staffSelect.disabled = false;
+      renderStaffList('');
       formWrap.hidden = false;
     }
 
     function openEditForm(h) {
       formTitle.textContent = 'Edit holiday';
       editIdInput.value = h.id;
-      staffSelect.value = h.staff_id;
-      staffSelect.disabled = true;
+      staffInput.value = h.staff_id;
+      if (staffSearchInput) { staffSearchInput.value = ''; staffSearchInput.disabled = true; }
+      if (staffListEl) staffListEl.hidden = true;
+      var staff = staffById(h.staff_id);
+      var name = staff ? staff.name : ('Staff ' + h.staff_id);
+      if (staffSelectedEl) { staffSelectedEl.textContent = 'Staff: ' + name; staffSelectedEl.hidden = false; }
       startInput.value = h.start_date || '';
       endInput.value = h.end_date || '';
       labelInput.value = h.label || '';
@@ -1125,8 +1175,9 @@
     form.addEventListener('submit', function (e) {
       e.preventDefault();
       var id = editIdInput.value.trim();
+      var staffId = staffInput.value.trim();
       var payload = {
-        staff_id: staffSelect.value,
+        staff_id: staffId,
         start_date: startInput.value,
         end_date: endInput.value,
         label: labelInput.value.trim(),
@@ -1135,8 +1186,16 @@
         alert('Please set From and To dates.');
         return;
       }
+      if (!id && !staffId) {
+        alert('Please select a staff member.');
+        return;
+      }
       var url = id ? API + '/holidays/' + encodeURIComponent(id) : API + '/holidays';
       var method = id ? 'PATCH' : 'POST';
+      if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.textContent = 'Saving…';
+      }
       fetch(url, {
         method: method,
         headers: { 'Content-Type': 'application/json' },
@@ -1146,11 +1205,22 @@
           if (!res.ok) return res.json().then(function (d) { throw new Error(d.error || res.status); });
           formWrap.hidden = true;
           loadStaffAndHolidays();
-          staffTable(); // Refresh staff so on_holiday_today is correct before next availability toggle
+          staffTable();
         })
-        .catch(function (e) { alert('Error: ' + e.message); });
+        .catch(function (e) { alert('Error: ' + e.message); })
+        .finally(function () {
+          if (submitBtn) {
+            submitBtn.disabled = false;
+            submitBtn.textContent = 'Confirm';
+          }
+        });
     });
 
+    if (staffSearchInput) {
+      staffSearchInput.addEventListener('input', function () {
+        renderStaffList(staffSearchInput.value);
+      });
+    }
     formCancelBtn.addEventListener('click', function () { formWrap.hidden = true; });
     addBtn.addEventListener('click', openAddForm);
     closeBtn.addEventListener('click', closeModal);
