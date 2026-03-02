@@ -1196,6 +1196,11 @@ code {
   margin-top: 0.5rem;
 }
 
+#holiday-add-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 .holidays-views {
   margin-top: 0.75rem;
 }

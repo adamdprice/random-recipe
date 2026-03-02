@@ -1034,6 +1034,7 @@
     function openModal() {
       modal.hidden = false;
       formWrap.hidden = true;
+      if (addBtn) addBtn.disabled = false;
       editIdInput.value = '';
       currentCalendarMonth = new Date();
       loadStaffAndHolidays();
@@ -1041,6 +1042,7 @@
 
     function closeModal() {
       modal.hidden = true;
+      if (addBtn) addBtn.disabled = false;
       staffTable();
     }
 
@@ -1284,6 +1286,7 @@
       labelInput.value = '';
       renderStaffList('');
       formWrap.hidden = false;
+      if (addBtn) addBtn.disabled = true;
     }
 
     function openEditForm(h) {
@@ -1299,6 +1302,7 @@
       endInput.value = h.end_date || '';
       labelInput.value = h.label || '';
       formWrap.hidden = false;
+      if (addBtn) addBtn.disabled = true;
     }
 
     function deleteHoliday(id) {
@@ -1346,6 +1350,7 @@
         .then(function (res) {
           if (!res.ok) return res.json().then(function (d) { throw new Error(d.error || res.status); });
           formWrap.hidden = true;
+          if (addBtn) addBtn.disabled = false;
           loadStaffAndHolidays();
           staffTable();
         })
@@ -1393,7 +1398,10 @@
       tabListBtn.addEventListener('click', function () { setView('list'); });
     }
 
-    formCancelBtn.addEventListener('click', function () { formWrap.hidden = true; });
+    formCancelBtn.addEventListener('click', function () {
+      formWrap.hidden = true;
+      if (addBtn) addBtn.disabled = false;
+    });
     addBtn.addEventListener('click', function () { openAddForm(); });
     closeBtn.addEventListener('click', closeModal);
     modal.querySelector('.modal-backdrop').addEventListener('click', closeModal);
