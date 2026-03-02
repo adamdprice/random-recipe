@@ -19,3 +19,12 @@ Thumbs.db
 # Logs
 *.log
 npm-debug.log*
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.pyc
+
+# App data (holidays, activity log)
+data/

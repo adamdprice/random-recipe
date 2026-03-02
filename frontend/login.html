@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Sign in – Kinly Lead Distribution</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body class="login-page">
+  <main class="login-card card">
+    <h1>Lead Distribution</h1>
+    <p class="login-subtitle">Sign in with your email</p>
+    <div id="login-step-email">
+      <form id="login-email-form" class="form">
+        <div class="form-group">
+          <label for="login-email">Email</label>
+          <input type="email" id="login-email" name="email" required placeholder="you@company.com" autocomplete="email" />
+        </div>
+        <button type="submit" class="btn">Send code</button>
+      </form>
+      <p id="login-email-error" class="error" hidden></p>
+    </div>
+    <div id="login-step-code" hidden>
+      <p class="hint">We sent a code to <strong id="login-email-display"></strong></p>
+      <form id="login-code-form" class="form">
+        <input type="hidden" id="login-email-hidden" name="email" />
+        <div class="form-group">
+          <label for="login-code">Code</label>
+          <input type="text" id="login-code" name="code" required placeholder="000000" autocomplete="one-time-code" maxlength="8" />
+        </div>
+        <button type="submit" class="btn">Sign in</button>
+      </form>
+      <p id="login-code-error" class="error" hidden></p>
+      <button type="button" id="login-back" class="btn btn-secondary">Use a different email</button>
+    </div>
+  </main>
+  <script>
+    (function () {
+      const API = '/api';
+      var stepEmail = document.getElementById('login-step-email');
+      var stepCode = document.getElementById('login-step-code');
+      var emailInput = document.getElementById('login-email');
+      var emailDisplay = document.getElementById('login-email-display');
+      var emailHidden = document.getElementById('login-email-hidden');
+      var codeInput = document.getElementById('login-code');
+      var emailError = document.getElementById('login-email-error');
+      var codeError = document.getElementById('login-code-error');
+
+      document.getElementById('login-email-form').addEventListener('submit', function (e) {
+        e.preventDefault();
+        var email = (emailInput.value || '').trim().toLowerCase();
+        if (!email) return;
+        emailError.hidden = true;
+        fetch(API + '/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: email })
+        })
+          .then(function (r) { return r.json().then(function (d) { return { status: r.status, data: d }; }); })
+          .then(function (res) {
+            if (res.status === 200 && res.data.sent) {
+              emailHidden.value = email;
+              emailDisplay.textContent = email;
+              stepEmail.hidden = true;
+              stepCode.hidden = false;
+              codeInput.value = '';
+              codeInput.focus();
+            } else {
+              emailError.textContent = (res.data && res.data.error) ? res.data.error : 'Failed to send code';
+              emailError.hidden = false;
+            }
+          })
+          .catch(function () {
+            emailError.textContent = 'Network error. Try again.';
+            emailError.hidden = false;
+          });
+      });
+
+      document.getElementById('login-code-form').addEventListener('submit', function (e) {
+        e.preventDefault();
+        var email = (emailHidden.value || '').trim();
+        var code = (codeInput.value || '').trim();
+        if (!email || !code) return;
+        codeError.hidden = true;
+        fetch(API + '/login/verify', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: email, code: code })
+        })
+          .then(function (r) { return r.json().then(function (d) { return { status: r.status, data: d }; }); })
+          .then(function (res) {
+            if (res.status === 200 && res.data.ok) {
+              window.location.href = '/';
+            } else {
+              codeError.textContent = (res.data && res.data.error) ? res.data.error : 'Invalid code';
+              codeError.hidden = false;
+            }
+          })
+          .catch(function () {
+            codeError.textContent = 'Network error. Try again.';
+            codeError.hidden = false;
+          });
+      });
+
+      document.getElementById('login-back').addEventListener('click', function () {
+        stepCode.hidden = true;
+        stepEmail.hidden = false;
+        emailError.hidden = true;
+        codeError.hidden = true;
+      });
+    })();
+  </script>
+</body>
+</html>
