@@ -28,6 +28,7 @@ Add these in **Railway → Your Service → Variables**. Copy each **Variable** 
 | `HUBSPOT_LEAD_TEAM_OBJECT_ID` | Your Lead Team object ID |
 | `HUBSPOT_LEAD_PIPELINE_STAGE` | `new-stage-id` (or your stage) |
 | `WEBHOOK_SECRET` | Only if using the lead-team webhook |
+| `DATABASE_URL` | PostgreSQL connection URL (e.g. from Railway **Add PostgreSQL**). When set, staff/lead-teams/owners are cached in DB for 3 minutes so the dashboard loads faster and HubSpot is called less often. |
 
 ---
 

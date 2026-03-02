@@ -68,6 +68,7 @@ In the Railway project → your service → **Variables**, add the same keys you
 - **Required:** `HUBSPOT_LEAD_TEAM_OBJECT_ID`
 - **Required:** `HUBSPOT_STAFF_OBJECT_ID` (or leave default `2-194632537` if that’s your Staff object)
 - Optional: `HUBSPOT_LEAD_PIPELINE_STAGE`, `WEBHOOK_SECRET`, `FLASK_DEBUG` (leave unset or `0` in production)
+- Optional: `DATABASE_URL` – when set (e.g. Railway **Add PostgreSQL**), staff, lead teams and owners are cached in a `hubspot_cache` table for 3 minutes so the dashboard is faster and HubSpot API is used less. If unset, every request hits HubSpot.
 - Optional login: `SESSION_SECRET` and either `APP_PASSWORD_HASH` (password) or SMTP + `EMAIL_FROM` (passwordless email code); optionally `ALLOWED_EMAILS` (comma-separated)
 
 Do **not** commit `.env` or any file containing the token.

@@ -77,6 +77,15 @@ OTP_RATE_EMAIL_SECONDS = 2 * 60  # 1 code per email per 2 minutes
 OTP_RATE_IP_MAX = 10
 OTP_RATE_IP_WINDOW = 15 * 60  # 10 sends per IP per 15 minutes
 
+# HubSpot read cache (staff, lead_teams, owners) in PostgreSQL when DATABASE_URL is set
+from hubspot_cache_db import (
+    init_db as _init_hubspot_cache_db,
+    cache_get as _hubspot_cache_get,
+    cache_set as _hubspot_cache_set,
+    cache_invalidate as _hubspot_cache_invalidate,
+)
+_init_hubspot_cache_db()
+
 
 def _session_serializer():
     if not SESSION_SECRET:
@@ -473,42 +482,17 @@ def _count_unallocated_contacts(client: HubSpotClient, lead_priority_values: lis
 
 @app.route("/api/lead-teams", methods=["GET"])
 def list_lead_teams():
-    from config import LEAD_PRIORITY_BY_TYPE
     if not HUBSPOT_LEAD_TEAM_OBJECT_ID:
         return jsonify({"lead_teams": [], "message": "HUBSPOT_LEAD_TEAM_OBJECT_ID not set"}), 200
+    if request.args.get("refresh") != "1":
+        cached = _hubspot_cache_get("lead_teams")
+        if cached is not None:
+            return jsonify(cached)
     try:
         client = get_client()
-        result = client.search_custom_objects(
-            HUBSPOT_LEAD_TEAM_OBJECT_ID,
-            filter_groups=[{"filters": [{"propertyName": "name", "operator": "HAS_PROPERTY"}]}],
-            properties=["name", "max_leads"],
-            limit=100,
-        )
-        if not isinstance(result, dict):
-            result = {"results": []}
-        def _prop(p, key):
-            v = p.get(key) if isinstance(p, dict) else None
-            if v is None:
-                return None
-            if isinstance(v, dict) and "value" in v:
-                return v["value"]
-            return v
-
-        items = []
-        for r in result.get("results", []):
-            props = r.get("properties") or {}
-            if not isinstance(props, dict):
-                continue
-            team_name = _prop(props, "name") or r.get("id")
-            priorities = LEAD_PRIORITY_BY_TYPE.get(team_name, []) if team_name else []
-            unallocated = _count_unallocated_contacts(client, priorities) if priorities else 0
-            items.append({
-                "id": r.get("id"),
-                "name": team_name,
-                "max_leads": _prop(props, "max_leads"),
-                "unallocated": unallocated,
-            })
-        return jsonify({"lead_teams": items})
+        out = _fetch_lead_teams_from_hubspot(client)
+        _hubspot_cache_set("lead_teams", out)
+        return jsonify(out)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -561,6 +545,120 @@ def propagate_team_max_leads_to_staff(client: HubSpotClient, team_object_id: str
     ]
     client.batch_update_custom_objects(HUBSPOT_STAFF_OBJECT_ID, inputs)
     return len(inputs)
+
+
+def _fetch_lead_teams_from_hubspot(client: HubSpotClient):
+    """Fetch lead teams + unallocated counts from HubSpot. Returns dict for cache: {"lead_teams": [...]}."""
+    from config import LEAD_PRIORITY_BY_TYPE
+    if not HUBSPOT_LEAD_TEAM_OBJECT_ID:
+        return {"lead_teams": []}
+    result = client.search_custom_objects(
+        HUBSPOT_LEAD_TEAM_OBJECT_ID,
+        filter_groups=[{"filters": [{"propertyName": "name", "operator": "HAS_PROPERTY"}]}],
+        properties=["name", "max_leads"],
+        limit=100,
+    )
+    if not isinstance(result, dict):
+        result = {"results": []}
+    items = []
+    for r in result.get("results", []):
+        props = r.get("properties") or {}
+        if not isinstance(props, dict):
+            continue
+        team_name = _prop_value(props, "name") or r.get("id")
+        priorities = LEAD_PRIORITY_BY_TYPE.get(team_name, []) if team_name else []
+        unallocated = _count_unallocated_contacts(client, priorities) if priorities else 0
+        items.append({
+            "id": r.get("id"),
+            "name": team_name,
+            "max_leads": _prop_value(props, "max_leads"),
+            "unallocated": unallocated,
+        })
+    return {"lead_teams": items}
+
+
+def _fetch_owners_from_hubspot(client: HubSpotClient):
+    """Fetch HubSpot owners. Returns dict for cache: {"owners": [...]}."""
+    owners = client.get_owners()
+    out = []
+    for o in owners if isinstance(owners, list) else []:
+        out.append({
+            "id": o.get("id"),
+            "firstName": o.get("firstName") or "",
+            "lastName": o.get("lastName") or "",
+            "email": o.get("email") or "",
+        })
+    return {"owners": out}
+
+
+def _fetch_staff_from_hubspot(client: HubSpotClient):
+    """Fetch staff + call minutes from HubSpot. Returns dict for cache: {"staff": [...]}. Slow (N+1 call-minutes)."""
+    from config import HUBSPOT_STAFF_OBJECT_ID
+    result = client.search_custom_objects(
+        HUBSPOT_STAFF_OBJECT_ID,
+        filter_groups=[{"filters": [{"propertyName": "hubspot_owner_id", "operator": "HAS_PROPERTY"}]}],
+        properties=[
+            "name", "hubspot_owner_id", "lead_teams", "availability", "pause_leads",
+            "max_pip_leads", "max_inbound_leads", "max_panther_leads", "max_frosties_leads",
+            "open_pip_leads_n8n", "open_inbound_leads_n8n", "open_panther_leads", "open_frosties_leads",
+        ],
+        limit=100,
+    )
+    if not isinstance(result, dict):
+        result = {"results": []}
+    items = []
+    for r in result.get("results", []):
+        props = r.get("properties") or {}
+        if not isinstance(props, dict):
+            continue
+        owner_id = _prop_value(props, "hubspot_owner_id")
+        display_name = _prop_value(props, "name") or owner_id or "—"
+        items.append({
+            "id": r.get("id"),
+            "hubspot_owner_id": owner_id,
+            "name": display_name,
+            "lead_teams": _prop_value(props, "lead_teams"),
+            "availability": _prop_value(props, "availability"),
+            "pause_leads": _prop_value(props, "pause_leads"),
+            "max_pip_leads": _prop_value(props, "max_pip_leads"),
+            "max_inbound_leads": _prop_value(props, "max_inbound_leads"),
+            "max_panther_leads": _prop_value(props, "max_panther_leads"),
+            "max_frosties_leads": _prop_value(props, "max_frosties_leads"),
+            "open_pip_leads_n8n": _prop_value(props, "open_pip_leads_n8n"),
+            "open_inbound_leads_n8n": _prop_value(props, "open_inbound_leads_n8n"),
+            "open_panther_leads": _prop_value(props, "open_panther_leads"),
+            "open_frosties_leads": _prop_value(props, "open_frosties_leads"),
+        })
+    from holidays import is_staff_on_holiday_today
+    for item in items:
+        item["on_holiday_today"] = is_staff_on_holiday_today(str(item["id"]))
+    for i, item in enumerate(items):
+        if i > 0:
+            time.sleep(0.2)
+        mins = _get_call_minutes_last_120(client, item.get("hubspot_owner_id"))
+        item["call_minutes_last_120"] = mins if mins is not None else 0
+    return {"staff": items}
+
+
+def _warm_hubspot_cache() -> None:
+    """Fetch staff, lead_teams, owners from HubSpot and write to DB cache. Safe to call from background thread."""
+    if not HUBSPOT_ACCESS_TOKEN:
+        return
+    try:
+        client = get_client()
+        _hubspot_cache_set("lead_teams", _fetch_lead_teams_from_hubspot(client))
+    except Exception as e:
+        _log.warning("Cache warm lead_teams failed: %s", e)
+    try:
+        client = get_client()
+        _hubspot_cache_set("owners", _fetch_owners_from_hubspot(client))
+    except Exception as e:
+        _log.warning("Cache warm owners failed: %s", e)
+    try:
+        client = get_client()
+        _hubspot_cache_set("staff", _fetch_staff_from_hubspot(client))
+    except Exception as e:
+        _log.warning("Cache warm staff failed: %s", e)
 
 
 def run_periodic_refresh() -> None:
@@ -661,6 +759,7 @@ def patch_lead_team(object_id):
             {"max_leads": new_value},
         )
         propagate_team_max_leads_to_staff(client, object_id, new_value)
+        _hubspot_cache_invalidate("lead_teams", "staff")
         return jsonify({"ok": True})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -702,6 +801,7 @@ def webhook_lead_team_max_leads():
     try:
         client = get_client()
         updated = propagate_team_max_leads_to_staff(client, str(object_id), new_value)
+        _hubspot_cache_invalidate("lead_teams", "staff")
         return jsonify({"ok": True, "staff_updated": updated}), 200
     except Exception as e:
         app.logger.exception("Webhook lead-team-max-leads failed")
@@ -716,6 +816,7 @@ def _run_manual_refresh_background() -> None:
         from distribution_engine import refresh_staff_open_leads
         result = refresh_staff_open_leads()
         updated = result.get("updated", 0)
+        _hubspot_cache_invalidate("staff", "lead_teams")
         _log_activity("refresh_leads", f"Manual refresh: updated {updated} staff", {"source": "manual", "updated": updated})
     except Exception as e:
         _log_activity("refresh_error", f"Manual refresh failed: {e}", {"source": "manual", "error": str(e)})
@@ -748,73 +849,15 @@ def activity_log():
 
 @app.route("/api/staff", methods=["GET"])
 def list_staff():
-    from config import HUBSPOT_STAFF_OBJECT_ID
+    if request.args.get("refresh") != "1":
+        cached = _hubspot_cache_get("staff")
+        if cached is not None:
+            return jsonify(cached)
     try:
         client = get_client()
-        # List all staff (include "name" property from Staff custom object)
-        result = client.search_custom_objects(
-            HUBSPOT_STAFF_OBJECT_ID,
-            filter_groups=[{"filters": [{"propertyName": "hubspot_owner_id", "operator": "HAS_PROPERTY"}]}],
-            properties=[
-                "name",
-                "hubspot_owner_id",
-                "lead_teams",
-                "availability",
-                "pause_leads",
-                "max_pip_leads",
-                "max_inbound_leads",
-                "max_panther_leads",
-                "max_frosties_leads",
-                "open_pip_leads_n8n",
-                "open_inbound_leads_n8n",
-                "open_panther_leads",
-                "open_frosties_leads",
-            ],
-            limit=100,
-        )
-        if not isinstance(result, dict):
-            result = {"results": []}
-        def _v(props, k):
-            p = props.get(k) if isinstance(props, dict) else None
-            if p is None:
-                return None
-            if isinstance(p, dict) and "value" in p:
-                return p["value"]
-            return p
-
-        items = []
-        for r in result.get("results", []):
-            props = r.get("properties") or {}
-            if not isinstance(props, dict):
-                continue
-            owner_id = _v(props, "hubspot_owner_id")
-            # Use Staff object "name" property; fallback to owner ID
-            display_name = _v(props, "name") or owner_id or "—"
-            items.append({
-                "id": r.get("id"),
-                "hubspot_owner_id": owner_id,
-                "name": display_name,
-                "lead_teams": _v(props, "lead_teams"),
-                "availability": _v(props, "availability"),
-                "pause_leads": _v(props, "pause_leads"),
-                "max_pip_leads": _v(props, "max_pip_leads"),
-                "max_inbound_leads": _v(props, "max_inbound_leads"),
-                "max_panther_leads": _v(props, "max_panther_leads"),
-                "max_frosties_leads": _v(props, "max_frosties_leads"),
-                "open_pip_leads_n8n": _v(props, "open_pip_leads_n8n"),
-                "open_inbound_leads_n8n": _v(props, "open_inbound_leads_n8n"),
-                "open_panther_leads": _v(props, "open_panther_leads"),
-                "open_frosties_leads": _v(props, "open_frosties_leads"),
-            })
-        from holidays import is_staff_on_holiday_today
-        for item in items:
-            item["on_holiday_today"] = is_staff_on_holiday_today(str(item["id"]))
-        for i, item in enumerate(items):
-            if i > 0:
-                time.sleep(0.2)
-            mins = _get_call_minutes_last_120(client, item.get("hubspot_owner_id"))
-            item["call_minutes_last_120"] = mins if mins is not None else 0
-        return jsonify({"staff": items})
+        out = _fetch_staff_from_hubspot(client)
+        _hubspot_cache_set("staff", out)
+        return jsonify(out)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -822,18 +865,15 @@ def list_staff():
 @app.route("/api/owners", methods=["GET"])
 def list_owners():
     """Return HubSpot owners (for creating a new staff member)."""
+    if request.args.get("refresh") != "1":
+        cached = _hubspot_cache_get("owners")
+        if cached is not None:
+            return jsonify(cached)
     try:
         client = get_client()
-        owners = client.get_owners()
-        out = []
-        for o in owners if isinstance(owners, list) else []:
-            out.append({
-                "id": o.get("id"),
-                "firstName": o.get("firstName") or "",
-                "lastName": o.get("lastName") or "",
-                "email": o.get("email") or "",
-            })
-        return jsonify({"owners": out})
+        payload = _fetch_owners_from_hubspot(client)
+        _hubspot_cache_set("owners", payload)
+        return jsonify(payload)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -925,6 +965,7 @@ def create_staff():
             "on_holiday_today": False,
             "call_minutes_last_120": 0,
         }
+        _hubspot_cache_invalidate("staff", "lead_teams")
         out = {"staff": new_staff}
         if lead_teams_warning:
             out["lead_teams_warning"] = lead_teams_warning
@@ -1056,6 +1097,7 @@ def patch_staff(object_id):
                 object_id,
                 {"lead_teams": new_value},
             )
+            _hubspot_cache_invalidate("staff", "lead_teams")
             return jsonify({"ok": True})
         if availability is not None:
             client.patch_custom_object(
@@ -1063,6 +1105,7 @@ def patch_staff(object_id):
                 object_id,
                 {"availability": str(availability)},
             )
+            _hubspot_cache_invalidate("staff", "lead_teams")
             return jsonify({"ok": True})
         if pause_leads is not None:
             client.patch_custom_object(
@@ -1070,6 +1113,7 @@ def patch_staff(object_id):
                 object_id,
                 {"pause_leads": str(pause_leads)},
             )
+            _hubspot_cache_invalidate("staff", "lead_teams")
             return jsonify({"ok": True})
         return jsonify({"error": "provide availability, pause_leads, add_team, or remove_team"}), 400
     except Exception as e:
@@ -1208,6 +1252,23 @@ def _refresh_loop() -> None:
 
 _refresh_thread = threading.Thread(target=_refresh_loop, daemon=True, name="kinly-refresh")
 _refresh_thread.start()
+
+
+def _cache_warmer_loop() -> None:
+    """Background loop: wait 15s, then warm HubSpot cache every 2 min so dashboard loads are fast."""
+    time.sleep(15)
+    while True:
+        try:
+            _warm_hubspot_cache()
+        except Exception as e:
+            _log.warning("Cache warmer error: %s", e)
+        time.sleep(120)
+
+
+if os.getenv("DATABASE_URL"):
+    _warmer_thread = threading.Thread(target=_cache_warmer_loop, daemon=True, name="cache-warmer")
+    _warmer_thread.start()
+    _log.info("HubSpot cache warmer started (runs every 2 min)")
 
 if __name__ == "__main__":
     import os
