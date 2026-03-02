@@ -1,6 +1,7 @@
 """
 Kinly Lead Distribution - Flask API and dashboard.
 """
+import json
 import logging
 import os
 import threading
@@ -33,6 +34,7 @@ from config import (
     HUBSPOT_ACCESS_TOKEN,
     HUBSPOT_LEAD_TEAM_OBJECT_ID,
     HUBSPOT_STAFF_OBJECT_ID,
+    HUBSPOT_STAFF_HOLIDAYS_PROPERTY,
     WEBHOOK_SECRET,
     SESSION_SECRET,
     APP_PASSWORD_HASH,
@@ -84,7 +86,110 @@ from hubspot_cache_db import (
     cache_set as _hubspot_cache_set,
     cache_invalidate as _hubspot_cache_invalidate,
 )
+from holidays_db import init_holidays_db, holidays_load_all, holidays_save_all
+from holidays import set_storage as _holidays_set_storage
+
 _init_hubspot_cache_db()
+init_holidays_db()
+
+
+def _hubspot_holidays_load() -> dict:
+    """Load holidays from HubSpot Staff property (one JSON array per staff). Returns same shape as file: {holidays: [...], saved_availability: {}}."""
+    if not HUBSPOT_STAFF_HOLIDAYS_PROPERTY or not HUBSPOT_STAFF_OBJECT_ID:
+        return {"holidays": [], "saved_availability": {}}
+    try:
+        client = get_client()
+        result = client.search_custom_objects(
+            HUBSPOT_STAFF_OBJECT_ID,
+            filter_groups=[{"filters": [{"propertyName": "hubspot_owner_id", "operator": "HAS_PROPERTY"}]}],
+            properties=[HUBSPOT_STAFF_HOLIDAYS_PROPERTY],
+            limit=100,
+        )
+        holidays = []
+        for r in (result.get("results") or []):
+            staff_id = str(r.get("id") or "")
+            props = r.get("properties") or {}
+            raw = props.get(HUBSPOT_STAFF_HOLIDAYS_PROPERTY)
+            if isinstance(raw, dict) and "value" in raw:
+                raw = raw["value"]
+            if not raw or not isinstance(raw, str):
+                continue
+            try:
+                arr = json.loads(raw)
+            except (TypeError, ValueError):
+                continue
+            if not isinstance(arr, list):
+                continue
+            for h in arr:
+                if isinstance(h, dict):
+                    holidays.append({**h, "staff_id": staff_id})
+        return {"holidays": holidays, "saved_availability": {}}
+    except Exception as e:
+        _log.warning("HubSpot holidays load failed: %s", e)
+        return {"holidays": [], "saved_availability": {}}
+
+
+def _hubspot_holidays_save(data: dict) -> None:
+    """Save holidays back to HubSpot: group by staff_id, PATCH each staff's property."""
+    if not HUBSPOT_STAFF_HOLIDAYS_PROPERTY or not HUBSPOT_STAFF_OBJECT_ID:
+        return
+    holidays = data.get("holidays") or []
+    by_staff = {}
+    for h in holidays:
+        sid = str(h.get("staff_id") or "")
+        if sid not in by_staff:
+            by_staff[sid] = []
+        by_staff[sid].append({k: v for k, v in h.items() if k != "staff_id"})
+    try:
+        client = get_client()
+        # Staff that have the property set but now have no holidays: we must clear it
+        result = client.search_custom_objects(
+            HUBSPOT_STAFF_OBJECT_ID,
+            filter_groups=[{"filters": [{"propertyName": HUBSPOT_STAFF_HOLIDAYS_PROPERTY, "operator": "HAS_PROPERTY"}]}],
+            properties=["id"],
+            limit=100,
+        )
+        for r in (result.get("results") or []):
+            sid = str(r.get("id") or "")
+            if sid not in by_staff:
+                by_staff[sid] = []
+        for staff_id, list_for_staff in by_staff.items():
+            client.patch_custom_object(
+                HUBSPOT_STAFF_OBJECT_ID,
+                staff_id,
+                {HUBSPOT_STAFF_HOLIDAYS_PROPERTY: json.dumps(list_for_staff)},
+            )
+    except Exception as e:
+        _log.warning("HubSpot holidays save failed: %s", e)
+
+
+def _holidays_db_load() -> dict:
+    """
+    Load holidays from PostgreSQL.
+    If DB is empty but HUBSPOT_STAFF_HOLIDAYS_PROPERTY is set, seed from HubSpot once.
+    """
+    data = holidays_load_all()
+    if (not data.get("holidays")) and HUBSPOT_STAFF_HOLIDAYS_PROPERTY:
+        seed = _hubspot_holidays_load()
+        if seed.get("holidays"):
+            holidays_save_all(seed)
+            return seed
+    return data
+
+
+def _holidays_db_save(data: dict) -> None:
+    """Write holidays to PostgreSQL and (optionally) mirror to HubSpot property."""
+    holidays_save_all(data)
+    if HUBSPOT_STAFF_HOLIDAYS_PROPERTY:
+        _hubspot_holidays_save(data)
+
+
+if os.getenv("DATABASE_URL"):
+    # Use PostgreSQL as canonical holidays store, optionally mirrored to HubSpot
+    _holidays_set_storage(_holidays_db_load, _holidays_db_save)
+elif HUBSPOT_STAFF_HOLIDAYS_PROPERTY:
+    # No DB; fall back to storing holidays directly on Staff records in HubSpot
+    _holidays_set_storage(_hubspot_holidays_load, _hubspot_holidays_save)
 
 
 def _session_serializer():

@@ -18,12 +18,25 @@ _data_dir = os.path.join(_app_dir, "data")
 HOLIDAYS_PATH = os.path.join(_data_dir, "holidays.json")
 _LOCK = threading.Lock()
 
+# Optional custom storage: when set, _load() and _save() use these instead of the JSON file (e.g. for HubSpot-backed storage).
+_custom_load = None
+_custom_save = None
+
+
+def set_storage(load_fn, save_fn):
+    """Use custom load/save (e.g. HubSpot) instead of the JSON file. load_fn() -> dict, save_fn(data) -> None."""
+    global _custom_load, _custom_save
+    _custom_load = load_fn
+    _custom_save = save_fn
+
 
 def _ensure_data_dir() -> None:
     os.makedirs(_data_dir, exist_ok=True)
 
 
 def _load() -> dict[str, Any]:
+    if _custom_load is not None:
+        return _custom_load()
     _LOCK.acquire()
     try:
         if not os.path.isfile(HOLIDAYS_PATH):
@@ -38,6 +51,9 @@ def _load() -> dict[str, Any]:
 
 
 def _save(data: dict[str, Any]) -> None:
+    if _custom_save is not None:
+        _custom_save(data)
+        return
     _ensure_data_dir()
     _LOCK.acquire()
     try:

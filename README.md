@@ -69,6 +69,7 @@ In the Railway project → your service → **Variables**, add the same keys you
 - **Required:** `HUBSPOT_STAFF_OBJECT_ID` (or leave default `2-194632537` if that’s your Staff object)
 - Optional: `HUBSPOT_LEAD_PIPELINE_STAGE`, `WEBHOOK_SECRET`, `FLASK_DEBUG` (leave unset or `0` in production)
 - Optional: `DATABASE_URL` – when set (e.g. Railway **Add PostgreSQL**), staff, lead teams and owners are cached in a `hubspot_cache` table for 3 minutes so the dashboard is faster and HubSpot API is used less. If unset, every request hits HubSpot.
+- Optional: `HUBSPOT_STAFF_HOLIDAYS_PROPERTY` – when set to a **Staff** property name (e.g. `holidays` or `blocked_dates`), holidays are stored on each staff record in HubSpot (use a **Multi-line text** or **Rich text** field). This avoids losing holidays on redeploy; create the property in HubSpot first, then set this variable.
 - Optional login: `SESSION_SECRET` and either `APP_PASSWORD_HASH` (password) or SMTP + `EMAIL_FROM` (passwordless email code); optionally `ALLOWED_EMAILS` (comma-separated)
 
 Do **not** commit `.env` or any file containing the token.

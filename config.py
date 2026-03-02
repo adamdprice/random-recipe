@@ -4,6 +4,8 @@ import os
 HUBSPOT_ACCESS_TOKEN = os.getenv("HUBSPOT_ACCESS_TOKEN", "")
 HUBSPOT_STAFF_OBJECT_ID = os.getenv("HUBSPOT_STAFF_OBJECT_ID", "2-194632537")
 HUBSPOT_LEAD_TEAM_OBJECT_ID = os.getenv("HUBSPOT_LEAD_TEAM_OBJECT_ID", "").strip() or None
+# Optional: Staff custom object property for holidays (e.g. "holidays" or "blocked_dates"). Use a multi-line or rich text field. When set, holidays are stored per staff in HubSpot instead of the local JSON file.
+HUBSPOT_STAFF_HOLIDAYS_PROPERTY = os.getenv("HUBSPOT_STAFF_HOLIDAYS_PROPERTY", "").strip() or None
 HUBSPOT_LEAD_PIPELINE_STAGE = os.getenv("HUBSPOT_LEAD_PIPELINE_STAGE", "new-stage-id")
 
 # Optional: if set, webhook requests must include this in X-Webhook-Secret header or ?secret= query

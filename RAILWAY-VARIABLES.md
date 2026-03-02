@@ -29,6 +29,7 @@ Add these in **Railway → Your Service → Variables**. Copy each **Variable** 
 | `HUBSPOT_LEAD_PIPELINE_STAGE` | `new-stage-id` (or your stage) |
 | `WEBHOOK_SECRET` | Only if using the lead-team webhook |
 | `DATABASE_URL` | PostgreSQL connection URL (e.g. from Railway **Add PostgreSQL**). When set, staff/lead-teams/owners are cached in DB for 3 minutes so the dashboard loads faster and HubSpot is called less often. |
+| `HUBSPOT_STAFF_HOLIDAYS_PROPERTY` | Name of a **Staff** custom object property (e.g. `holidays` or `blocked_dates`). Use a **Multi-line text** or **Rich text** field in HubSpot. When set, holidays are stored on each staff record in HubSpot instead of a local file, so they persist across deploys. Create the property in HubSpot first, then set this variable. |
 
 ---
 
