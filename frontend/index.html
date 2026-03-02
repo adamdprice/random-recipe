@@ -223,10 +223,24 @@
     <div class="modal-dialog card holidays-dialog">
       <h2 id="holidays-modal-title" class="section-head">Holidays</h2>
       <p class="hint">Block dates per staff. From 00:00 on start day they are set inactive; when they return, active again.</p>
-      <div id="holidays-list-wrap">
-        <div id="holidays-loading" class="loading" hidden>Loading…</div>
-        <ul id="holidays-list" class="holidays-list"></ul>
-        <p id="holidays-empty" class="empty" hidden>No holidays booked.</p>
+      <div id="holidays-loading" class="loading" hidden>Loading…</div>
+      <div id="holidays-views" class="holidays-views" hidden>
+        <div class="holidays-view-tabs" role="tablist">
+          <button type="button" id="holidays-tab-calendar" class="holidays-tab active" role="tab" aria-selected="true">Calendar</button>
+          <button type="button" id="holidays-tab-list" class="holidays-tab" role="tab" aria-selected="false">List</button>
+        </div>
+        <div id="holidays-calendar-wrap" class="holidays-calendar-wrap" role="tabpanel">
+          <div class="holidays-month-nav">
+            <button type="button" id="holidays-prev-month" class="btn btn-secondary" aria-label="Previous month">←</button>
+            <h3 id="holidays-month-label" class="holidays-month-label"></h3>
+            <button type="button" id="holidays-next-month" class="btn btn-secondary" aria-label="Next month">→</button>
+          </div>
+          <div id="holidays-calendar-grid" class="holidays-calendar-grid"></div>
+        </div>
+        <div id="holidays-list-wrap" class="holidays-list-wrap" role="tabpanel" hidden>
+          <ul id="holidays-list" class="holidays-list"></ul>
+          <p id="holidays-empty" class="empty" hidden>No holidays booked.</p>
+        </div>
       </div>
       <div id="holiday-form-wrap" class="holiday-form-wrap" hidden>
         <h3 class="holiday-form-title">Add holiday</h3>

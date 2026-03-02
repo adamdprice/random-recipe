@@ -1016,13 +1016,26 @@
     var closeBtn = document.querySelector('.holidays-close');
     var staffCache = [];
     var staffForSelect = [];
+    var holidaysCache = [];
+    var currentCalendarMonth = new Date();
+    var viewMode = 'calendar';
 
     var loadingEl = document.getElementById('holidays-loading');
+    var viewsEl = document.getElementById('holidays-views');
+    var tabCalendarBtn = document.getElementById('holidays-tab-calendar');
+    var tabListBtn = document.getElementById('holidays-tab-list');
+    var calendarWrap = document.getElementById('holidays-calendar-wrap');
+    var listWrap = document.getElementById('holidays-list-wrap');
+    var prevMonthBtn = document.getElementById('holidays-prev-month');
+    var nextMonthBtn = document.getElementById('holidays-next-month');
+    var monthLabelEl = document.getElementById('holidays-month-label');
+    var calendarGridEl = document.getElementById('holidays-calendar-grid');
 
     function openModal() {
       modal.hidden = false;
       formWrap.hidden = true;
       editIdInput.value = '';
+      currentCalendarMonth = new Date();
       loadStaffAndHolidays();
     }
 
@@ -1087,38 +1100,151 @@
         fetch(API + '/holidays').then(parseJsonResponse),
       ]).then(function (results) {
         if (loadingEl) loadingEl.hidden = true;
-        listEl.hidden = false;
         var staffData = results[0];
         var holidaysData = results[1];
         if (staffData.error) {
+          if (viewsEl) viewsEl.hidden = false;
+          if (listWrap) listWrap.hidden = false;
+          if (calendarWrap) calendarWrap.hidden = true;
           listEl.innerHTML = '<li class="error">' + (staffData.error || 'Failed to load staff') + '</li>';
-          emptyEl.hidden = true;
+          if (emptyEl) emptyEl.hidden = true;
           return;
         }
         staffCache = staffData.staff || [];
         staffForSelect = dedupeAndSortStaff(staffCache);
-        var holidays = holidaysData.holidays || [];
-        listEl.innerHTML = '';
-        if (holidays.length === 0) {
-          emptyEl.hidden = false;
-        } else {
-          emptyEl.hidden = true;
-          holidays.forEach(function (h) {
-            var li = document.createElement('li');
-            var staff = staffById(h.staff_id);
-            var name = staff ? staff.name : ('Staff ' + h.staff_id);
-            var labelPart = h.label ? ' – ' + h.label : '';
-            li.innerHTML = '<span><strong>' + escapeHtml(name) + '</strong> <span class="holiday-dates">' + escapeHtml(h.start_date) + ' to ' + escapeHtml(h.end_date) + '</span>' + escapeHtml(labelPart) + '</span><span class="holiday-actions"><button type="button" class="btn btn-secondary holiday-edit" data-id="' + escapeHtml(h.id) + '">Edit</button><button type="button" class="btn btn-secondary holiday-delete" data-id="' + escapeHtml(h.id) + '">Delete</button></span>';
-            listEl.appendChild(li);
-            li.querySelector('.holiday-edit').addEventListener('click', function () { openEditForm(h); });
-            li.querySelector('.holiday-delete').addEventListener('click', function () { deleteHoliday(h.id); });
-          });
-        }
+        holidaysCache = holidaysData.holidays || [];
+        if (viewsEl) viewsEl.hidden = false;
+        renderCalendar();
+        renderList();
       }).catch(function (e) {
         if (loadingEl) loadingEl.hidden = true;
-        listEl.hidden = false;
+        if (viewsEl) viewsEl.hidden = false;
+        if (listWrap) listWrap.hidden = false;
+        if (calendarWrap) calendarWrap.hidden = true;
         listEl.innerHTML = '<li class="error">' + escapeHtml(e.message || 'Failed to load') + '</li>';
-        emptyEl.hidden = true;
+        if (emptyEl) emptyEl.hidden = true;
+      });
+    }
+
+    function isDateInRange(dayStr, startStr, endStr) {
+      if (!dayStr || !startStr || !endStr) return false;
+      return dayStr >= startStr && dayStr <= endStr;
+    }
+
+    function formatMonthLabel(d) {
+      return d.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
+    }
+
+    function renderCalendar() {
+      if (!calendarGridEl || !monthLabelEl) return;
+      var y = currentCalendarMonth.getFullYear();
+      var m = currentCalendarMonth.getMonth();
+      monthLabelEl.textContent = formatMonthLabel(currentCalendarMonth);
+      var first = new Date(y, m, 1);
+      var last = new Date(y, m + 1, 0);
+      var startDay = first.getDay();
+      var daysInMonth = last.getDate();
+      var grid = [];
+      var weekDays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+      weekDays.forEach(function (d) {
+        grid.push({ head: true, text: d });
+      });
+      var pad = startDay;
+      while (pad--) grid.push({ other: true, day: 0 });
+      for (var d = 1; d <= daysInMonth; d++) {
+        var dateStr = y + '-' + String(m + 1).padStart(2, '0') + '-' + String(d).padStart(2, '0');
+        grid.push({ other: false, day: d, dateStr: dateStr });
+      }
+      var totalCells = Math.ceil(grid.length / 7) * 7;
+      while (grid.length < totalCells) grid.push({ other: true, day: 0 });
+      calendarGridEl.innerHTML = '';
+      grid.forEach(function (cell, idx) {
+        if (cell.head) {
+          var th = document.createElement('div');
+          th.className = 'holidays-calendar-day-head';
+          th.textContent = cell.text;
+          calendarGridEl.appendChild(th);
+          return;
+        }
+        var cellEl = document.createElement('div');
+        cellEl.className = 'holidays-calendar-day' + (cell.other ? ' other-month' : '');
+        if (cell.other && cell.day === 0) {
+          calendarGridEl.appendChild(cellEl);
+          return;
+        }
+        var dayNum = cell.day;
+        var dateStr = cell.dateStr;
+        var onThisDay = holidaysCache.filter(function (h) {
+          return isDateInRange(dateStr, h.start_date, h.end_date);
+        });
+        var namesEl = document.createElement('div');
+        namesEl.className = 'holidays-calendar-day-names';
+        onThisDay.forEach(function (h) {
+          var staff = staffById(h.staff_id);
+          var name = staff ? staff.name : ('Staff ' + h.staff_id);
+          var span = document.createElement('span');
+          span.className = 'holidays-calendar-day-name';
+          span.textContent = name;
+          span.title = (h.label ? h.label + ' – ' : '') + h.start_date + ' to ' + h.end_date;
+          namesEl.appendChild(span);
+        });
+        var numWrap = document.createElement('div');
+        numWrap.className = 'holidays-calendar-day-num';
+        var numSpan = document.createElement('span');
+        numSpan.textContent = dayNum || '';
+        numWrap.appendChild(numSpan);
+        if (!cell.other) {
+          var addBtn = document.createElement('button');
+          addBtn.type = 'button';
+          addBtn.className = 'holidays-calendar-day-add';
+          addBtn.title = 'Add holiday starting this day';
+          addBtn.textContent = '+';
+          addBtn.addEventListener('click', function () {
+            openAddForm(dateStr);
+          });
+          numWrap.appendChild(addBtn);
+        }
+        cellEl.appendChild(numWrap);
+        cellEl.appendChild(namesEl);
+        calendarGridEl.appendChild(cellEl);
+      });
+    }
+
+    function renderList() {
+      listEl.innerHTML = '';
+      if (emptyEl) emptyEl.hidden = true;
+      var sorted = holidaysCache.slice().sort(function (a, b) {
+        var da = (a.start_date || '').localeCompare(b.start_date || '');
+        if (da !== 0) return da;
+        var na = (staffById(a.staff_id) || {}).name || a.staff_id || '';
+        var nb = (staffById(b.staff_id) || {}).name || b.staff_id || '';
+        return String(na).toLowerCase().localeCompare(String(nb).toLowerCase());
+      });
+      if (sorted.length === 0) {
+        if (emptyEl) emptyEl.hidden = false;
+        return;
+      }
+      var currentMonthKey = null;
+      sorted.forEach(function (h) {
+        var startStr = h.start_date || '';
+        var monthKey = startStr.length >= 7 ? startStr.slice(0, 7) : '';
+        if (monthKey && monthKey !== currentMonthKey) {
+          currentMonthKey = monthKey;
+          var d = new Date(monthKey + '-01');
+          var monthTitle = d.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
+          var headLi = document.createElement('li');
+          headLi.className = 'holidays-list-month-head';
+          headLi.textContent = monthTitle;
+          listEl.appendChild(headLi);
+        }
+        var li = document.createElement('li');
+        var staff = staffById(h.staff_id);
+        var name = staff ? staff.name : ('Staff ' + h.staff_id);
+        var labelPart = h.label ? ' – ' + h.label : '';
+        li.innerHTML = '<span><strong>' + escapeHtml(name) + '</strong> <span class="holiday-dates">' + escapeHtml(h.start_date) + ' to ' + escapeHtml(h.end_date) + '</span>' + escapeHtml(labelPart) + '</span><span class="holiday-actions"><button type="button" class="btn btn-secondary holiday-edit" data-id="' + escapeHtml(h.id) + '">Edit</button><button type="button" class="btn btn-secondary holiday-delete" data-id="' + escapeHtml(h.id) + '">Delete</button></span>';
+        li.querySelector('.holiday-edit').addEventListener('click', function () { openEditForm(h); });
+        li.querySelector('.holiday-delete').addEventListener('click', function () { deleteHoliday(h.id); });
+        listEl.appendChild(li);
       });
     }
 
@@ -1129,7 +1255,7 @@
       return div.innerHTML;
     }
 
-    function openAddForm() {
+    function openAddForm(prefillStartDate) {
       formTitle.textContent = 'Add holiday';
       editIdInput.value = '';
       staffInput.value = '';
@@ -1137,8 +1263,8 @@
       if (staffSearchInput) staffSearchInput.disabled = false;
       if (staffListEl) staffListEl.hidden = false;
       if (staffSelectedEl) { staffSelectedEl.textContent = ''; staffSelectedEl.hidden = true; }
-      startInput.value = '';
-      endInput.value = '';
+      startInput.value = prefillStartDate || '';
+      endInput.value = prefillStartDate || '';
       labelInput.value = '';
       renderStaffList('');
       formWrap.hidden = false;
@@ -1221,8 +1347,37 @@
         renderStaffList(staffSearchInput.value);
       });
     }
+    function setView(mode) {
+      viewMode = mode;
+      if (tabCalendarBtn) tabCalendarBtn.classList.toggle('active', mode === 'calendar');
+      if (tabListBtn) tabListBtn.classList.toggle('active', mode === 'list');
+      if (tabCalendarBtn) tabCalendarBtn.setAttribute('aria-selected', mode === 'calendar');
+      if (tabListBtn) tabListBtn.setAttribute('aria-selected', mode === 'list');
+      if (calendarWrap) calendarWrap.hidden = mode !== 'calendar';
+      if (listWrap) listWrap.hidden = mode !== 'list';
+    }
+
+    if (prevMonthBtn) {
+      prevMonthBtn.addEventListener('click', function () {
+        currentCalendarMonth = new Date(currentCalendarMonth.getFullYear(), currentCalendarMonth.getMonth() - 1);
+        renderCalendar();
+      });
+    }
+    if (nextMonthBtn) {
+      nextMonthBtn.addEventListener('click', function () {
+        currentCalendarMonth = new Date(currentCalendarMonth.getFullYear(), currentCalendarMonth.getMonth() + 1);
+        renderCalendar();
+      });
+    }
+    if (tabCalendarBtn) {
+      tabCalendarBtn.addEventListener('click', function () { setView('calendar'); });
+    }
+    if (tabListBtn) {
+      tabListBtn.addEventListener('click', function () { setView('list'); });
+    }
+
     formCancelBtn.addEventListener('click', function () { formWrap.hidden = true; });
-    addBtn.addEventListener('click', openAddForm);
+    addBtn.addEventListener('click', function () { openAddForm(); });
     closeBtn.addEventListener('click', closeModal);
     modal.querySelector('.modal-backdrop').addEventListener('click', closeModal);
     document.getElementById('holidays-btn').addEventListener('click', openModal);

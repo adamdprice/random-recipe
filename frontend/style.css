@@ -1190,6 +1190,151 @@ code {
   margin-top: 0.5rem;
 }
 
+.holidays-views {
+  margin-top: 0.75rem;
+}
+
+.holidays-view-tabs {
+  display: flex;
+  gap: 0.25rem;
+  margin-bottom: 0.75rem;
+}
+
+.holidays-tab {
+  padding: 0.4rem 0.75rem;
+  font-size: 0.9rem;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.holidays-tab:hover {
+  background: var(--bg-hover, #f0f0f0);
+}
+
+.holidays-tab.active {
+  background: var(--primary, #333);
+  color: #fff;
+  border-color: var(--primary, #333);
+}
+
+.holidays-month-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.holidays-month-label {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.holidays-calendar-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 2px;
+  font-size: 0.75rem;
+}
+
+.holidays-calendar-day-head {
+  padding: 0.25rem;
+  text-align: center;
+  font-weight: 600;
+  color: var(--text-muted, #666);
+}
+
+.holidays-calendar-day {
+  min-height: 4rem;
+  padding: 0.25rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.holidays-calendar-day.other-month {
+  opacity: 0.45;
+}
+
+.holidays-calendar-day-num {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.2rem;
+}
+
+.holidays-calendar-day-num span {
+  font-weight: 600;
+}
+
+.holidays-calendar-day-add {
+  width: 1.25rem;
+  height: 1.25rem;
+  padding: 0;
+  line-height: 1;
+  font-size: 0.9rem;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  cursor: pointer;
+  color: var(--text-muted, #666);
+  flex-shrink: 0;
+}
+
+.holidays-calendar-day-add:hover {
+  background: var(--primary, #333);
+  color: #fff;
+  border-color: var(--primary, #333);
+}
+
+.holidays-calendar-day-names {
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.holidays-calendar-day-name {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding: 0.1rem 0.25rem;
+  background: var(--bg-soft, #f5f5f5);
+  border-radius: 2px;
+  font-size: 0.7rem;
+}
+
+.holidays-list-wrap .holidays-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.holidays-list-by-month {
+  margin-bottom: 1rem;
+}
+
+.holidays-list-month-head {
+  list-style: none;
+  margin: 0.75rem 0 0.25rem 0;
+  padding: 0.25rem 0;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text-muted, #666);
+  border-bottom: 1px solid var(--border);
+}
+
+.holidays-list-month-head:first-child {
+  margin-top: 0;
+}
+
 /* Create staff modal: search + clickable user list */
 #create-staff-modal .create-staff-search-input {
   font-size: 1rem;
