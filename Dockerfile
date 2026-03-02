@@ -12,4 +12,4 @@ COPY . .
 
 # Railway sets PORT
 EXPOSE 3000
-CMD ["sh", "-c", "npx serve . -p ${PORT:-3000}"]
+CMD ["sh", "-c", "npx serve frontend -p ${PORT:-3000} -s"]
