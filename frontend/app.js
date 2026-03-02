@@ -1106,6 +1106,7 @@
           if (viewsEl) viewsEl.hidden = false;
           if (listWrap) listWrap.hidden = false;
           if (calendarWrap) calendarWrap.hidden = true;
+          listEl.hidden = false;
           listEl.innerHTML = '<li class="error">' + (staffData.error || 'Failed to load staff') + '</li>';
           if (emptyEl) emptyEl.hidden = true;
           return;
@@ -1114,6 +1115,7 @@
         staffForSelect = dedupeAndSortStaff(staffCache);
         holidaysCache = holidaysData.holidays || [];
         if (viewsEl) viewsEl.hidden = false;
+        listEl.hidden = false;
         renderCalendar();
         renderList();
       }).catch(function (e) {
@@ -1121,6 +1123,7 @@
         if (viewsEl) viewsEl.hidden = false;
         if (listWrap) listWrap.hidden = false;
         if (calendarWrap) calendarWrap.hidden = true;
+        listEl.hidden = false;
         listEl.innerHTML = '<li class="error">' + escapeHtml(e.message || 'Failed to load') + '</li>';
         if (emptyEl) emptyEl.hidden = true;
       });
