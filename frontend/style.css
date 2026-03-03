@@ -1163,6 +1163,13 @@ code {
   flex-shrink: 0;
 }
 
+.reassign-select-all-row {
+  margin-bottom: 0.5rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid var(--border);
+  font-weight: 600;
+}
+
 .reassign-done-msg {
   margin: 0 0 1rem 0;
   font-weight: 600;

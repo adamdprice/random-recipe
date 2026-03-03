@@ -836,6 +836,15 @@
     confirmBtn.disabled = checked.length === 0;
   }
 
+  function reassignUpdateSelectAll() {
+    var listEl = document.getElementById('reassign-target-list');
+    var selectAllCb = listEl ? listEl.querySelector('.reassign-select-all-cb') : null;
+    if (!selectAllCb) return;
+    var staffCbs = listEl.querySelectorAll('.reassign-staff-cb');
+    var n = staffCbs.length;
+    selectAllCb.checked = n > 0 && listEl.querySelectorAll('.reassign-staff-cb:checked').length === n;
+  }
+
   function reassignShowStep2() {
     var categoriesEl = document.getElementById('reassign-categories');
     var selected = [];
@@ -851,27 +860,48 @@
     document.getElementById('reassign-step1').hidden = true;
     document.getElementById('reassign-step2').hidden = false;
     document.getElementById('reassign-done').hidden = true;
-    document.getElementById('reassign-confirm-msg').textContent = 'You are about to re-assign ' + total + ' lead(s). Choose who will receive them (sorted by most open leads first):';
+    document.getElementById('reassign-confirm-msg').textContent = 'You are about to re-assign ' + total + ' lead(s). Choose who will receive them (sorted by fewest open leads first):';
     var listEl = document.getElementById('reassign-target-list');
     listEl.innerHTML = '';
     if (targetStaff.length === 0) {
       listEl.innerHTML = '<li class="empty">No available staff in this team.</li>';
     } else {
+      var selectAllLi = document.createElement('li');
+      selectAllLi.className = 'reassign-target-item reassign-select-all-row';
+      var selectAllCb = document.createElement('input');
+      selectAllCb.type = 'checkbox';
+      selectAllCb.className = 'reassign-select-all-cb';
+      selectAllCb.checked = false;
+      var selectAllLabel = document.createElement('label');
+      selectAllLabel.appendChild(selectAllCb);
+      selectAllLabel.appendChild(document.createTextNode(' Select all'));
+      selectAllLi.appendChild(selectAllLabel);
+      listEl.appendChild(selectAllLi);
+
       targetStaff.forEach(function (s) {
         var li = document.createElement('li');
         li.className = 'reassign-target-item';
         var cb = document.createElement('input');
         cb.type = 'checkbox';
         cb.className = 'reassign-staff-cb';
-        cb.checked = true;
+        cb.checked = false;
         cb.setAttribute('data-owner-id', s.hubspot_owner_id || '');
-        cb.addEventListener('change', reassignUpdateConfirmButton);
+        cb.addEventListener('change', function () {
+          reassignUpdateConfirmButton();
+          reassignUpdateSelectAll();
+        });
         var label = document.createElement('label');
         label.appendChild(cb);
         var n = s.total_open_leads != null ? s.total_open_leads : 0;
         label.appendChild(document.createTextNode(' ' + (s.name || s.hubspot_owner_id) + ' — ' + n + ' open lead(s)'));
         li.appendChild(label);
         listEl.appendChild(li);
+      });
+
+      selectAllCb.addEventListener('change', function () {
+        var checked = selectAllCb.checked;
+        listEl.querySelectorAll('.reassign-staff-cb').forEach(function (cb) { cb.checked = checked; });
+        reassignUpdateConfirmButton();
       });
     }
     reassignState.selectedCategories = selected;

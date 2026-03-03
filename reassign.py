@@ -226,7 +226,7 @@ def _get_target_staff(
             "name": name,
             "total_open_leads": total_open,
         })
-    out.sort(key=lambda x: x.get("total_open_leads", 0), reverse=True)
+    out.sort(key=lambda x: x.get("total_open_leads", 0))  # least leads first
     return out
 
 
@@ -275,7 +275,10 @@ def execute_reassign(
     if not target_staff:
         return {"reassigned": 0, "assignments": [], "error": "No staff selected to receive leads"}
 
-    # Round-robin assign contacts to target staff
+    # Order by fewest open leads first so they get first pick; then cycle through the list
+    target_staff = sorted(target_staff, key=lambda x: x.get("total_open_leads", 0))
+
+    # Assign one contact at a time, cycling through staff (least leads → next → … → back to first)
     assignments = []
     for i, cid in enumerate(contact_ids):
         staff = target_staff[i % len(target_staff)]
