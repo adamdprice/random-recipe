@@ -69,6 +69,27 @@ def _parse_date(raw: Any) -> Optional[date]:
         return None
 
 
+def _parse_time(raw: Any) -> Optional[str]:
+    """Parse time from raw datetime string (e.g. '2025-03-15T14:30:00.000Z'). Return 'HH:MM' or None."""
+    if raw is None:
+        return None
+    s = _str(raw)
+    if len(s) < 16:
+        return None
+    if s[10] not in ("T", " "):
+        return None
+    try:
+        # Parse HH:MM (and optionally :SS)
+        part = s[11:16]
+        if len(part) >= 5 and part[2] == ":":
+            h, m = int(part[:2]), int(part[3:5])
+            if 0 <= h <= 23 and 0 <= m <= 59:
+                return f"{h:02d}:{m:02d}"
+    except (ValueError, TypeError):
+        pass
+    return None
+
+
 def _is_future(d: Optional[date]) -> bool:
     if d is None:
         return False
@@ -291,3 +312,94 @@ def execute_reassign(
         })
 
     return {"reassigned": len(assignments), "assignments": assignments, "error": None}
+
+
+def list_callbacks(
+    client: HubSpotClient,
+    owner_id: str,
+    team_name: str,
+) -> dict:
+    """
+    Return list of call backs (leads with future call_back_date) for this owner and team.
+    Each item: { lead_id, contact_id, call_back_date, call_back_time }. Sorted chronologically.
+    """
+    leads = _fetch_leads_for_owner_team(client, owner_id, team_name)
+    call_back_leads = []
+    for lead in leads:
+        cats = _categorize_lead(lead)
+        if CATEGORY_CALL_BACK not in cats:
+            continue
+        props = lead.get("properties") or {}
+        raw_cb = _prop_value(props, REASSIGN_CALL_BACK_DATE_PROPERTY)
+        cb_date = _parse_date(raw_cb)
+        if not _is_future(cb_date):
+            continue
+        cb_time = _parse_time(raw_cb)
+        call_back_leads.append({
+            "lead_id": lead.get("id"),
+            "call_back_date": cb_date.isoformat() if cb_date else None,
+            "call_back_time": cb_time,
+        })
+    if not call_back_leads:
+        return {"callbacks": [], "target_staff": _get_target_staff(client, team_name, exclude_owner_id=owner_id)}
+
+    lead_ids = [str(item["lead_id"]) for item in call_back_leads if item.get("lead_id")]
+    assoc = client.get_lead_to_contact_associations_batch(lead_ids) if lead_ids else {}
+    out_list = []
+    for item in call_back_leads:
+        cids = assoc.get(str(item["lead_id"]), [])
+        contact_id = str(cids[0]) if cids else None
+        out_list.append({
+            "lead_id": str(item["lead_id"]),
+            "contact_id": contact_id,
+            "call_back_date": item.get("call_back_date"),
+            "call_back_time": item.get("call_back_time"),
+        })
+    # Fetch contact names for display
+    contact_ids = [c["contact_id"] for c in out_list if c.get("contact_id")]
+    name_by_cid = {}
+    if contact_ids:
+        batch = client.batch_read_contacts(contact_ids, properties=["firstname", "lastname"])
+        for cid, props in batch.items():
+            first = _str(_prop_value(props, "firstname"))
+            last = _str(_prop_value(props, "lastname"))
+            name_by_cid[cid] = " ".join([first, last]).strip() or None
+    for c in out_list:
+        cid = c.get("contact_id")
+        c["contact_name"] = name_by_cid.get(cid) if cid else None
+    # Sort chronologically (date, then time)
+    def _sort_key(c):
+        d = c.get("call_back_date") or ""
+        t = c.get("call_back_time") or "00:00"
+        return (d, t)
+
+    out_list.sort(key=_sort_key)
+    return {
+        "callbacks": out_list,
+        "target_staff": _get_target_staff(client, team_name, exclude_owner_id=owner_id),
+    }
+
+
+def assign_single_contact(
+    client: HubSpotClient,
+    contact_id: str,
+    new_owner_id: str,
+    team_name: Optional[str] = None,
+) -> dict:
+    """
+    Assign one contact to a new owner. Returns { success: bool, error?: str }.
+    If team_name is provided, new_owner_id must be a staff member in that team (enforces same-team only).
+    """
+    if not contact_id or not new_owner_id:
+        return {"success": False, "error": "contact_id and new_owner_id required"}
+    if team_name:
+        allowed = _get_target_staff(client, team_name, exclude_owner_id="")
+        allowed_ids = {s.get("hubspot_owner_id") for s in allowed}
+        if new_owner_id not in allowed_ids:
+            return {"success": False, "error": "Selected staff member is not in this team"}
+    try:
+        client.patch_contact(str(contact_id), {"hubspot_owner_id": new_owner_id, "assign_lead": "Yes"})
+        return {"success": True}
+    except Exception as e:
+        _log.exception("assign_single_contact failed")
+        return {"success": False, "error": str(e)}

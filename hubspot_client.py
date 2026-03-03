@@ -60,6 +60,28 @@ class HubSpotClient:
             json={"properties": properties},
         )
 
+    def batch_read_contacts(
+        self,
+        contact_ids: list[str],
+        properties: Optional[list[str]] = None,
+    ) -> dict:
+        """Batch read contacts by ID. Returns dict: contact_id -> { properties }. HubSpot limit 100 per request."""
+        if not contact_ids:
+            return {}
+        props = properties or ["firstname", "lastname"]
+        ids = contact_ids[:100]
+        body = {
+            "inputs": [{"id": str(cid)} for cid in ids],
+            "properties": props,
+        }
+        result = self._request("POST", "/crm/v3/objects/contacts/batch/read", json=body)
+        out = {}
+        for obj in result.get("results", []):
+            cid = obj.get("id")
+            if cid is not None:
+                out[str(cid)] = obj.get("properties", {})
+        return out
+
     def search_contacts(
         self,
         filter_groups: list[dict],

@@ -303,6 +303,35 @@
           <button type="button" id="reassign-do-btn" class="btn" disabled>Re-assign</button>
           <button type="button" id="reassign-cancel-1" class="btn btn-secondary">Cancel</button>
         </div>
+        <div class="modal-actions" style="margin-top: 0.5rem;">
+          <button type="button" id="reassign-callback-mgmt-btn" class="btn btn-secondary">Call Back Management</button>
+        </div>
+      </div>
+      <div id="reassign-step-callbacks" class="reassign-step" hidden>
+        <p class="hint">Select a call back to re-assign to another team member.</p>
+        <div id="reassign-callbacks-loading" class="loading" hidden>Loading call backs…</div>
+        <ul id="reassign-callbacks-list" class="reassign-callbacks-list"></ul>
+        <div class="modal-actions" style="margin-top: 1rem;">
+          <button type="button" id="reassign-callbacks-back-btn" class="btn btn-secondary">Back</button>
+        </div>
+      </div>
+      <div id="reassign-step-callback-assign" class="reassign-step" hidden>
+        <div class="callback-assign-layout">
+          <div class="callback-assign-left">
+            <h3 class="callback-assign-heading">Re-assigning this call back</h3>
+            <div id="callback-assign-selected" class="callback-assign-selected"></div>
+            <label for="callback-assign-target-select" class="callback-assign-label">Assign to staff member (same team only)</label>
+            <select id="callback-assign-target-select" class="callback-assign-select" aria-label="Select staff member (same team only)"></select>
+            <div class="modal-actions" style="margin-top: 0.75rem;">
+              <button type="button" id="callback-assign-do-btn" class="btn" disabled>Re-assign</button>
+              <button type="button" id="callback-assign-back-btn" class="btn btn-secondary">Back</button>
+            </div>
+          </div>
+          <div class="callback-assign-right">
+            <h3 class="callback-assign-heading" id="callback-assign-target-title">Their call backs</h3>
+            <div id="callback-assign-target-callbacks" class="callback-assign-target-list"></div>
+          </div>
+        </div>
       </div>
       <div id="reassign-step2" class="reassign-step" hidden>
         <p id="reassign-confirm-msg" class="reassign-confirm-msg"></p>

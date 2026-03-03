@@ -1355,6 +1355,108 @@ code {
   font-weight: 600;
 }
 
+.reassign-callbacks-list {
+  list-style: none;
+  padding-left: 0;
+  margin: 0.75rem 0;
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+.reassign-callbacks-list li {
+  padding: 0.5rem 0.75rem;
+  margin-bottom: 0.25rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+
+.reassign-callbacks-list li:hover {
+  background: var(--accent-light);
+  border-color: var(--accent);
+}
+
+.reassign-callbacks-list li.selected {
+  background: var(--accent-light);
+  border-color: var(--accent);
+  font-weight: 600;
+}
+
+.callback-assign-layout {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.25rem;
+  margin-top: 0.5rem;
+}
+
+@media (max-width: 560px) {
+  .callback-assign-layout { grid-template-columns: 1fr; }
+}
+
+.reassign-dialog.reassign-dialog-wide {
+  max-width: 720px;
+}
+
+.callback-assign-heading {
+  margin: 0 0 0.5rem 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.callback-assign-selected {
+  padding: 0.5rem 0.75rem;
+  background: var(--accent-light);
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  margin-bottom: 0.75rem;
+  font-size: 0.9rem;
+  font-variant-numeric: tabular-nums;
+  white-space: pre-line;
+}
+
+.callback-assign-selected.callback-assign-no-contact {
+  background: var(--bg);
+  border-color: var(--border);
+  color: var(--text-muted);
+}
+
+.callback-assign-label {
+  display: block;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  margin-bottom: 0.25rem;
+}
+
+.callback-assign-select {
+  display: block;
+  width: 100%;
+  max-width: 240px;
+  padding: 0.4rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 0.9rem;
+  background: var(--card);
+  color: var(--text);
+  margin-bottom: 0.5rem;
+}
+
+.callback-assign-target-list {
+  max-height: 220px;
+  overflow-y: auto;
+  font-size: 0.85rem;
+  padding: 0.5rem 0;
+}
+
+.callback-assign-target-list .callback-item {
+  padding: 0.35rem 0.5rem;
+  border-bottom: 1px solid var(--border);
+  font-variant-numeric: tabular-nums;
+}
+
 .modal-backdrop {
   position: absolute;
   inset: 0;

@@ -10,7 +10,7 @@
       if (text.trimStart().indexOf('<') === 0) {
         var onLocalhost = /^localhost$|^127\.0\.0\.1$/.test(window.location.hostname);
         throw new Error(onLocalhost
-          ? 'Server returned HTML instead of JSON. Open the app from the Flask server (e.g. http://localhost:5001), not from a static file or another dev server.'
+          ? 'Server returned HTML instead of JSON. Open the app from the Flask server (e.g. http://localhost:5002 or http://localhost:5001) in your browser, not from a static file or another dev server.'
           : 'Something went wrong loading data. Try refreshing the page or signing in again.');
       }
       return JSON.parse(text);
@@ -1095,7 +1095,7 @@
     inactive.forEach(function (s) { inactiveEl.appendChild(buildStaffCard(layout, s, pauseLeadsOptions)); });
   }
 
-  var reassignState = { staff: null, team: null, preview: null };
+  var reassignState = { staff: null, team: null, preview: null, callbacks: null, targetStaff: null, selectedCallback: null };
 
   function openReassignModal(staff, teamName) {
     var modal = document.getElementById('reassign-modal');
@@ -1111,11 +1111,18 @@
     reassignState.staff = staff;
     reassignState.team = teamName;
     reassignState.preview = null;
+    reassignState.callbacks = null;
+    reassignState.targetStaff = null;
+    reassignState.selectedCallback = null;
     titleEl.textContent = 'Re-assign leads – ' + staffName + ' – ' + shortName;
     loadingEl.hidden = false;
     step1El.hidden = true;
     step2El.hidden = true;
     doneEl.hidden = true;
+    document.getElementById('reassign-step-callbacks').hidden = true;
+    document.getElementById('reassign-step-callback-assign').hidden = true;
+    var dialog = modal.querySelector('.reassign-dialog');
+    if (dialog) dialog.classList.remove('reassign-dialog-wide');
     modal.hidden = false;
 
     fetch(API + '/reassign/preview?owner_id=' + encodeURIComponent(staff.hubspot_owner_id) + '&team=' + encodeURIComponent(teamName))
@@ -1287,6 +1294,196 @@
       });
   }
 
+  function formatCallbackDate(dateStr) {
+    if (!dateStr) return '—';
+    var d = new Date(dateStr + 'T12:00:00');
+    if (isNaN(d.getTime())) return dateStr;
+    var months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    return d.getDate() + ' ' + months[d.getMonth()] + ' ' + d.getFullYear();
+  }
+
+  function renderCallbacksList() {
+    var listEl = document.getElementById('reassign-callbacks-list');
+    if (!listEl) return;
+    listEl.innerHTML = '';
+    var callbacks = reassignState.callbacks || [];
+    if (callbacks.length === 0) {
+      listEl.innerHTML = '<li class="empty">No call backs for this person in this team.</li>';
+    } else {
+      callbacks.forEach(function (cb, idx) {
+        var li = document.createElement('li');
+        li.setAttribute('data-index', String(idx));
+        var namePart = (cb.contact_name && cb.contact_name.trim()) ? cb.contact_name.trim() + ' — ' : '';
+        li.textContent = namePart + 'Call back: ' + formatCallbackDateTime(cb) + (cb.contact_id ? '' : ' (no contact – cannot reassign)');
+        li.addEventListener('click', function () { selectCallbackForAssign(cb); });
+        listEl.appendChild(li);
+      });
+    }
+  }
+
+  function formatCallbackDateTime(cb) {
+    if (!cb || !cb.call_back_date) return '—';
+    var datePart = formatCallbackDate(cb.call_back_date);
+    if (!cb.call_back_time) return datePart;
+    var t = cb.call_back_time;
+    var match = /^(\d{1,2}):(\d{2})/.exec(t);
+    if (!match) return datePart;
+    var h = parseInt(match[1], 10);
+    var m = match[2];
+    var ampm = h >= 12 ? 'pm' : 'am';
+    h = h % 12;
+    if (h === 0) h = 12;
+    return datePart + ', ' + h + ':' + m + ' ' + ampm;
+  }
+
+  function openCallbacksPanel() {
+    var staff = reassignState.staff;
+    var team = reassignState.team;
+    if (!staff || !team) return;
+    document.getElementById('reassign-step1').hidden = true;
+    document.getElementById('reassign-step2').hidden = true;
+    document.getElementById('reassign-done').hidden = true;
+    document.getElementById('reassign-step-callback-assign').hidden = true;
+    var stepCallbacks = document.getElementById('reassign-step-callbacks');
+    var listEl = document.getElementById('reassign-callbacks-list');
+    var loadingEl = document.getElementById('reassign-callbacks-loading');
+    stepCallbacks.hidden = false;
+    listEl.innerHTML = '';
+    loadingEl.hidden = false;
+    fetch(API + '/reassign/callbacks?owner_id=' + encodeURIComponent(staff.hubspot_owner_id) + '&team=' + encodeURIComponent(team))
+      .then(parseJsonResponse)
+      .then(function (data) {
+        loadingEl.hidden = true;
+        if (data.error) {
+          alert('Error: ' + data.error);
+          return;
+        }
+        reassignState.callbacks = data.callbacks || [];
+        reassignState.targetStaff = data.target_staff || [];
+        renderCallbacksList();
+      })
+      .catch(function (e) {
+        loadingEl.hidden = true;
+        alert('Error: ' + (e.message || 'Failed to load call backs'));
+      });
+  }
+
+  function selectCallbackForAssign(callback) {
+    reassignState.selectedCallback = callback;
+    document.getElementById('reassign-step-callbacks').hidden = true;
+    var assignStep = document.getElementById('reassign-step-callback-assign');
+    assignStep.hidden = false;
+    var dialog = document.querySelector('#reassign-modal .reassign-dialog');
+    if (dialog) dialog.classList.add('reassign-dialog-wide');
+
+    var selectedEl = document.getElementById('callback-assign-selected');
+    var hasContact = !!callback.contact_id;
+    var namePart = (callback.contact_name && callback.contact_name.trim()) ? callback.contact_name.trim() : '';
+    selectedEl.textContent = (namePart ? namePart + '\n' : '') + 'Date & time: ' + formatCallbackDateTime(callback);
+    selectedEl.classList.toggle('callback-assign-no-contact', !hasContact);
+
+    var label = assignStep ? assignStep.querySelector('.callback-assign-label') : null;
+    var selectEl = document.getElementById('callback-assign-target-select');
+    var doBtn = document.getElementById('callback-assign-do-btn');
+    if (!hasContact) {
+      if (label) label.textContent = 'This lead has no linked contact in HubSpot and cannot be reassigned.';
+      if (selectEl) { selectEl.innerHTML = '<option value="">—</option>'; selectEl.disabled = true; }
+      if (doBtn) doBtn.disabled = true;
+    } else {
+      if (label) label.textContent = 'Assign to staff member (same team only)';
+      if (selectEl) {
+        selectEl.disabled = false;
+        selectEl.innerHTML = '<option value="">— Select staff member —</option>';
+        var currentOwnerId = reassignState.staff ? reassignState.staff.hubspot_owner_id : '';
+        (reassignState.targetStaff || []).forEach(function (s) {
+          if (s.hubspot_owner_id === currentOwnerId) return;
+          var opt = document.createElement('option');
+          opt.value = s.hubspot_owner_id || '';
+          opt.textContent = (s.name || s.hubspot_owner_id) + ' (' + (s.total_open_leads != null ? s.total_open_leads : 0) + ' open leads)';
+          selectEl.appendChild(opt);
+        });
+      }
+      if (doBtn) doBtn.disabled = true;
+    }
+
+    document.getElementById('callback-assign-target-title').textContent = 'Their call backs';
+    document.getElementById('callback-assign-target-callbacks').innerHTML = '';
+  }
+
+  function callbackAssignTargetChange() {
+    var selectEl = document.getElementById('callback-assign-target-select');
+    var ownerId = (selectEl && selectEl.value || '').trim();
+    document.getElementById('callback-assign-do-btn').disabled = !ownerId;
+    var container = document.getElementById('callback-assign-target-callbacks');
+    if (!container) return;
+    if (!ownerId) {
+      container.innerHTML = '';
+      return;
+    }
+    var staff = (reassignState.targetStaff || []).find(function (s) { return s.hubspot_owner_id === ownerId; });
+    if (staff) document.getElementById('callback-assign-target-title').textContent = staff.name + "'s call backs";
+    container.innerHTML = '<div class="callback-item">Loading…</div>';
+    fetch(API + '/reassign/callbacks?owner_id=' + encodeURIComponent(ownerId) + '&team=' + encodeURIComponent(reassignState.team))
+      .then(parseJsonResponse)
+      .then(function (data) {
+        container.innerHTML = '';
+        (data.callbacks || []).forEach(function (cb) {
+          var div = document.createElement('div');
+          div.className = 'callback-item';
+          var namePart = (cb.contact_name && cb.contact_name.trim()) ? cb.contact_name.trim() + ' — ' : '';
+          div.textContent = namePart + formatCallbackDateTime(cb);
+          container.appendChild(div);
+        });
+        if ((data.callbacks || []).length === 0) {
+          container.innerHTML = '<div class="callback-item">No call backs</div>';
+        }
+      })
+      .catch(function () {
+        container.innerHTML = '<div class="callback-item">Failed to load</div>';
+      });
+  }
+
+  function callbackAssignDo() {
+    var cb = reassignState.selectedCallback;
+    var selectEl = document.getElementById('callback-assign-target-select');
+    var newOwnerId = (selectEl && selectEl.value || '').trim();
+    if (!cb || !cb.contact_id || !newOwnerId) return;
+    var btn = document.getElementById('callback-assign-do-btn');
+    btn.disabled = true;
+    btn.textContent = 'Reassigning…';
+    fetch(API + '/reassign/assign-one', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contact_id: cb.contact_id,
+        new_owner_id: newOwnerId,
+        team: reassignState.team,
+      }),
+    })
+      .then(parseJsonResponse)
+      .then(function (data) {
+        if (data.error && !data.success) {
+          alert('Error: ' + data.error);
+          return;
+        }
+        staffTable();
+        var contactId = cb.contact_id;
+        reassignState.callbacks = (reassignState.callbacks || []).filter(function (c) { return c.contact_id !== contactId; });
+        var dialog = document.querySelector('#reassign-modal .reassign-dialog');
+        if (dialog) dialog.classList.remove('reassign-dialog-wide');
+        document.getElementById('reassign-step-callback-assign').hidden = true;
+        document.getElementById('reassign-step-callbacks').hidden = false;
+        renderCallbacksList();
+      })
+      .catch(function (e) {
+        alert('Error: ' + (e.message || 'Request failed'));
+      })
+      .finally(function () {
+        btn.disabled = false;
+        btn.textContent = 'Re-assign';
+      });
+  }
+
   (function wireReassignModal() {
     var modal = document.getElementById('reassign-modal');
     if (!modal) return;
@@ -1294,6 +1491,24 @@
     if (doBtn) doBtn.addEventListener('click', reassignShowStep2);
     var cancel1 = document.getElementById('reassign-cancel-1');
     if (cancel1) cancel1.addEventListener('click', function () { modal.hidden = true; });
+    var callbackMgmtBtn = document.getElementById('reassign-callback-mgmt-btn');
+    if (callbackMgmtBtn) callbackMgmtBtn.addEventListener('click', openCallbacksPanel);
+    var callbacksBackBtn = document.getElementById('reassign-callbacks-back-btn');
+    if (callbacksBackBtn) callbacksBackBtn.addEventListener('click', function () {
+      document.getElementById('reassign-step-callbacks').hidden = true;
+      document.getElementById('reassign-step1').hidden = false;
+    });
+    var callbackAssignBackBtn = document.getElementById('callback-assign-back-btn');
+    if (callbackAssignBackBtn) callbackAssignBackBtn.addEventListener('click', function () {
+      var dialog = modal.querySelector('.reassign-dialog');
+      if (dialog) dialog.classList.remove('reassign-dialog-wide');
+      document.getElementById('reassign-step-callback-assign').hidden = true;
+      document.getElementById('reassign-step-callbacks').hidden = false;
+    });
+    var callbackAssignSelect = document.getElementById('callback-assign-target-select');
+    if (callbackAssignSelect) callbackAssignSelect.addEventListener('change', callbackAssignTargetChange);
+    var callbackAssignDoBtn = document.getElementById('callback-assign-do-btn');
+    if (callbackAssignDoBtn) callbackAssignDoBtn.addEventListener('click', callbackAssignDo);
     var backBtn = document.getElementById('reassign-back-btn');
     if (backBtn) backBtn.addEventListener('click', function () {
       document.getElementById('reassign-step2').hidden = true;

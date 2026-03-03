@@ -1367,6 +1367,57 @@ def reassign_execute():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route("/api/reassign/callbacks", methods=["GET"])
+def reassign_callbacks():
+    """GET ?owner_id=...&team=... Returns { callbacks: [...], target_staff: [...] } for Call Back Management."""
+    owner_id = (request.args.get("owner_id") or "").strip()
+    team = (request.args.get("team") or "").strip()
+    if not owner_id or not team:
+        return jsonify({"error": "owner_id and team required"}), 400
+    try:
+        from reassign import list_callbacks
+        from config import STAFF_LEAD_TEAMS
+        if team not in STAFF_LEAD_TEAMS:
+            return jsonify({"error": "invalid team"}), 400
+        client = get_client()
+        out = list_callbacks(client, owner_id, team)
+        return jsonify(out)
+    except Exception as e:
+        _log.exception("reassign callbacks failed")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/reassign/assign-one", methods=["POST"])
+def reassign_assign_one():
+    """POST { contact_id, new_owner_id, team }. Assigns a single contact to the new owner. team required so only same-team staff are allowed."""
+    data = request.get_json() or {}
+    contact_id = (data.get("contact_id") or "").strip() or None
+    new_owner_id = (data.get("new_owner_id") or "").strip() or None
+    team = (data.get("team") or "").strip() or None
+    if not contact_id or not new_owner_id:
+        return jsonify({"success": False, "error": "contact_id and new_owner_id required"}), 400
+    if not team:
+        return jsonify({"success": False, "error": "team required"}), 400
+    try:
+        from reassign import assign_single_contact
+        from config import STAFF_LEAD_TEAMS
+        if team not in STAFF_LEAD_TEAMS:
+            return jsonify({"success": False, "error": "invalid team"}), 400
+        client = get_client()
+        result = assign_single_contact(client, contact_id, new_owner_id, team_name=team)
+        if not result.get("success"):
+            return jsonify(result), 400
+        _log_activity(
+            "reassign",
+            f"Reassigned 1 contact to {new_owner_id}",
+            {"contact_id": contact_id, "new_owner_id": new_owner_id},
+        )
+        return jsonify(result)
+    except Exception as e:
+        _log.exception("reassign assign-one failed")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 # Ensure API errors never return HTML (so frontend never sees "Unexpected token '<'" from our app)
 @app.errorhandler(500)
 def api_500_json(e):
