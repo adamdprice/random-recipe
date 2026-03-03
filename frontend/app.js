@@ -1528,6 +1528,7 @@
       endInput.value = prefillStartDate || '';
       labelInput.value = '';
       renderStaffList('');
+      if (viewsEl) viewsEl.hidden = true;
       formWrap.hidden = false;
       if (addBtn) addBtn.disabled = true;
     }
@@ -1544,6 +1545,7 @@
       startInput.value = h.start_date || '';
       endInput.value = h.end_date || '';
       labelInput.value = h.label || '';
+      if (viewsEl) viewsEl.hidden = true;
       formWrap.hidden = false;
       if (addBtn) addBtn.disabled = true;
     }
@@ -1592,6 +1594,7 @@
       })
         .then(function (res) {
           if (!res.ok) return res.json().then(function (d) { throw new Error(d.error || res.status); });
+          if (viewsEl) viewsEl.hidden = false;
           formWrap.hidden = true;
           if (addBtn) addBtn.disabled = false;
           loadStaffAndHolidays();
@@ -1642,6 +1645,7 @@
     }
 
     formCancelBtn.addEventListener('click', function () {
+      if (viewsEl) viewsEl.hidden = false;
       formWrap.hidden = true;
       if (addBtn) addBtn.disabled = false;
     });
