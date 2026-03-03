@@ -7,12 +7,12 @@ for restoring availability after a holiday is stored in holiday_saved_availabili
 """
 import logging
 import os
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 _log = logging.getLogger(__name__)
 
 
-def _get_db_url() -> str | None:
+def _get_db_url() -> Optional[str]:
     return (os.getenv("DATABASE_URL") or "").strip() or None
 
 

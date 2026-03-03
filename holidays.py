@@ -8,7 +8,7 @@ import logging
 import os
 import threading
 from datetime import date, datetime
-from typing import Any
+from typing import Any, Optional
 
 _log = logging.getLogger(__name__)
 
@@ -67,7 +67,7 @@ def _today() -> date:
     return date.today()
 
 
-def _parse_d(d: str | None) -> date | None:
+def _parse_d(d: Optional[str]) -> Optional[date]:
     if not d:
         return None
     try:
@@ -82,7 +82,7 @@ def _date_in_range(d: date, start: date, end: date) -> bool:
     return start <= d <= end
 
 
-def list_holidays(staff_id: str | None = None) -> list[dict]:
+def list_holidays(staff_id: Optional[str] = None) -> list[dict]:
     data = _load()
     holidays = data.get("holidays") or []
     if staff_id is not None:
@@ -90,7 +90,7 @@ def list_holidays(staff_id: str | None = None) -> list[dict]:
     return holidays
 
 
-def get_holiday(holiday_id: str) -> dict | None:
+def get_holiday(holiday_id: str) -> Optional[dict]:
     for h in _load().get("holidays") or []:
         if str(h.get("id")) == str(holiday_id):
             return h
@@ -121,7 +121,7 @@ def add_holiday(staff_id: str, start_date: str, end_date: str, label: str = "") 
     return new_holiday
 
 
-def update_holiday(holiday_id: str, start_date: str | None = None, end_date: str | None = None, label: str | None = None) -> dict | None:
+def update_holiday(holiday_id: str, start_date: Optional[str] = None, end_date: Optional[str] = None, label: Optional[str] = None) -> Optional[dict]:
     data = _load()
     holidays = data.get("holidays") or []
     for i, h in enumerate(holidays):

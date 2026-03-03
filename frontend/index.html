@@ -78,6 +78,15 @@
           </div>
         </div>
         <p class="hint">Toggle availability. Data from HubSpot Staff custom object.</p>
+        <div class="staff-layout-wrap">
+          <label for="staff-layout-select" class="staff-layout-label">View:</label>
+          <select id="staff-layout-select" class="staff-layout-select" aria-label="Staff layout">
+            <option value="table">Table</option>
+            <option value="cards-a">Design A – Compact card</option>
+            <option value="cards-b">Design B – Stacked sections</option>
+            <option value="cards-c">Design C – Side-by-side</option>
+          </select>
+        </div>
         <div class="staff-search-wrap">
           <input type="search" id="staff-search-input" class="staff-search-input" placeholder="Search staff by name…" autocomplete="off" aria-label="Search staff by name" />
           <div id="staff-search-results" class="staff-search-results" hidden role="listbox" aria-label="Staff search results"></div>
@@ -85,6 +94,7 @@
         <div id="staff-loading" class="loading">Loading…</div>
         <div id="staff-error" class="error" hidden></div>
 
+        <div id="staff-table-wrap" class="staff-table-wrap">
         <div id="staff-active-section" class="staff-subsection">
           <h3 class="staff-subsection-title">Active</h3>
           <div class="table-scroll-wrap">
@@ -131,6 +141,14 @@
               </table>
             </div>
           </div>
+        </div>
+        </div>
+
+        <div id="staff-cards-wrap" class="staff-cards-wrap" hidden>
+          <h3 class="staff-subsection-title">Active</h3>
+          <div id="staff-cards-active" class="staff-cards-grid"></div>
+          <h3 class="staff-subsection-title">Inactive</h3>
+          <div id="staff-cards-inactive" class="staff-cards-grid"></div>
         </div>
       </div>
     </section>

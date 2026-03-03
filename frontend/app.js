@@ -764,6 +764,331 @@
           tbody.appendChild(reassignRow);
   }
 
+  function createTeamButtonForCard(s, teamName) {
+    var parsed = parseLeadTeams(s.lead_teams);
+    var inTeam = isInTeam(parsed, teamName);
+    var shortName = shortTeamName(teamName);
+    var staffName = s.name || s.hubspot_owner_id || 'this person';
+    var wrap = document.createElement('span');
+    var btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = inTeam ? 'team-tick-btn' : 'team-add-btn';
+    btn.textContent = inTeam ? '✓' : '+';
+    btn.title = inTeam ? 'Remove from ' + shortName : 'Add to ' + shortName;
+    btn.setAttribute('aria-label', inTeam ? 'Remove from ' + teamName : 'Add to ' + teamName);
+    btn.addEventListener('click', function () {
+      var msg = inTeam ? ('Remove ' + staffName + ' from ' + shortName + '?') : ('Add ' + staffName + ' to ' + shortName + '?');
+      showConfirm(msg).then(function (confirmed) {
+        if (!confirmed) return;
+        btn.disabled = true;
+        btn.textContent = '…';
+        var body = inTeam ? { remove_team: teamName } : { add_team: teamName };
+        fetch(API + '/staff/' + encodeURIComponent(s.id), {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        })
+          .then(function (res) {
+            if (!res.ok) return res.json().then(function (d) { throw new Error(d.error || res.status); });
+            staffTable();
+          })
+          .catch(function (e) {
+            alert('Error: ' + e.message);
+            btn.disabled = false;
+            btn.textContent = inTeam ? '✓' : '+';
+          });
+      });
+    });
+    wrap.appendChild(btn);
+    return wrap;
+  }
+
+  function buildStaffCard(layout, s, pauseLeadsOptions) {
+    var card = document.createElement('div');
+    card.className = 'staff-card staff-card-' + layout;
+    card.setAttribute('data-staff-id', String(s.id));
+    var name = s.name || s.hubspot_owner_id || '—';
+    var callMins = s.call_minutes_last_120 != null ? Math.min(Number(s.call_minutes_last_120) || 0, CALL_MINUTES_MAX) : 0;
+    var hue = Math.round((callMins / CALL_MINUTES_MAX) * 120);
+    var openInbound = s.open_inbound_leads_n8n != null ? Number(s.open_inbound_leads_n8n) : 0;
+    var openPip = s.open_pip_leads_n8n != null ? Number(s.open_pip_leads_n8n) : 0;
+    var openPanther = s.open_panther_leads != null ? Number(s.open_panther_leads) : 0;
+    var openFrosties = s.open_frosties_leads != null ? Number(s.open_frosties_leads) : 0;
+    var totalOpen = openInbound + openPip + openPanther + openFrosties;
+    var openCounts = [openInbound, openPip, openPanther, openFrosties];
+    var currentPause = (s.pause_leads != null && s.pause_leads !== '') ? String(s.pause_leads) : '';
+    var isAvailable = (s.availability || '').toLowerCase() !== 'unavailable';
+
+    var gaugeWrap = document.createElement('div');
+    gaugeWrap.className = 'temp-gauge-wrap';
+    gaugeWrap.title = callMins + ' min on calls (last 2h). Red = available, green = busy.';
+    var gaugeBar = document.createElement('div');
+    gaugeBar.className = 'temp-gauge-bar';
+    gaugeBar.style.backgroundColor = 'hsl(' + hue + ', 70%, 42%)';
+    gaugeWrap.appendChild(gaugeBar);
+    var gaugeLabel = document.createElement('span');
+    gaugeLabel.className = 'temp-gauge-label';
+    gaugeLabel.textContent = callMins + ' m';
+    gaugeWrap.appendChild(gaugeLabel);
+
+    var availLabel = document.createElement('label');
+    availLabel.className = 'toggle-switch';
+    var availInput = document.createElement('input');
+    availInput.type = 'checkbox';
+    availInput.checked = isAvailable;
+    availInput.setAttribute('aria-label', 'Availability');
+    availLabel.appendChild(availInput);
+    var availSpan = document.createElement('span');
+    availSpan.className = 'toggle-slider';
+    availLabel.appendChild(availSpan);
+    availInput.addEventListener('change', function () {
+      var value = this.checked ? 'Available' : 'Unavailable';
+      var doPatch = function () {
+        availInput.disabled = true;
+        fetch(API + '/staff/' + encodeURIComponent(s.id), {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ availability: value }),
+        })
+          .then(function (res) {
+            if (!res.ok) return res.json().then(function (d) { throw new Error(d.error || res.status); });
+          })
+          .catch(function (e) {
+            alert('Error: ' + e.message);
+            availInput.checked = !availInput.checked;
+          })
+          .finally(function () { availInput.disabled = false; staffTable(); });
+      };
+      if (this.checked && s.on_holiday_today) {
+        showConfirm('This staff member is set as away on holiday – are you sure you want to make them active?').then(function (confirmed) {
+          if (!confirmed) { availInput.checked = false; return; }
+          doPatch();
+        });
+      } else doPatch();
+    });
+
+    var pauseSelect = document.createElement('select');
+    pauseSelect.className = 'pause-leads-select';
+    pauseSelect.setAttribute('aria-label', 'Pause leads');
+    var opts = (pauseLeadsOptions || []);
+    var blankOpt = document.createElement('option');
+    blankOpt.value = '';
+    blankOpt.textContent = '—';
+    pauseSelect.appendChild(blankOpt);
+    opts.forEach(function (opt) {
+      var o = document.createElement('option');
+      o.value = opt.value;
+      o.textContent = opt.label || opt.value;
+      o.selected = opt.value === currentPause;
+      pauseSelect.appendChild(o);
+    });
+    if (currentPause && opts.every(function (o) { return o.value !== currentPause; })) {
+      var fallback = document.createElement('option');
+      fallback.value = currentPause;
+      fallback.textContent = currentPause;
+      fallback.selected = true;
+      pauseSelect.appendChild(fallback);
+    }
+    pauseSelect.addEventListener('change', function () {
+      var value = this.value;
+      pauseSelect.disabled = true;
+      fetch(API + '/staff/' + encodeURIComponent(s.id), {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pause_leads: value }),
+      })
+        .then(function (res) {
+          if (!res.ok) return res.json().then(function (d) { throw new Error(d.error || res.status); });
+        })
+        .catch(function (e) {
+          alert('Error: ' + e.message);
+          pauseSelect.value = currentPause;
+        })
+        .finally(function () { pauseSelect.disabled = false; staffTable(); });
+    });
+
+    if (layout === 'a') {
+      var head = document.createElement('div');
+      head.className = 'staff-card-head';
+      var nameEl = document.createElement('div');
+      nameEl.className = 'staff-card-name';
+      nameEl.textContent = name;
+      head.appendChild(nameEl);
+      head.appendChild(gaugeWrap);
+      card.appendChild(head);
+      var teamsRow = document.createElement('div');
+      teamsRow.className = 'staff-card-teams';
+      LEAD_TEAM_KEYS.forEach(function (teamName, idx) {
+        var pill = document.createElement('span');
+        pill.className = 'staff-card-team-pill';
+        pill.appendChild(document.createTextNode(shortTeamName(teamName) + ' '));
+        pill.appendChild(createTeamButtonForCard(s, teamName));
+        var openNum = document.createElement('span');
+        openNum.className = 'open-num';
+        openNum.textContent = openCounts[idx];
+        pill.appendChild(openNum);
+        teamsRow.appendChild(pill);
+      });
+      card.appendChild(teamsRow);
+      var meta = document.createElement('div');
+      meta.className = 'staff-card-meta';
+      var availWrap = document.createElement('span');
+      availWrap.appendChild(document.createTextNode('Availability '));
+      availWrap.appendChild(availLabel);
+      meta.appendChild(availWrap);
+      var pauseWrap = document.createElement('span');
+      pauseWrap.appendChild(document.createTextNode('Pause '));
+      pauseWrap.appendChild(pauseSelect);
+      meta.appendChild(pauseWrap);
+      if (s.on_holiday_today) {
+        var hol = document.createElement('span');
+        hol.className = 'availability-holiday-icon';
+        hol.title = 'On holiday';
+        hol.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 2v4M16 2v4M3 10h18M5 4h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z"/></svg>';
+        meta.appendChild(hol);
+      }
+      card.appendChild(meta);
+      var reassignRow = document.createElement('div');
+      reassignRow.className = 'staff-card-reassign';
+      var rLabel = document.createElement('span');
+      rLabel.className = 'reassign-label';
+      rLabel.textContent = 'Re-assign ';
+      reassignRow.appendChild(rLabel);
+      LEAD_TEAM_KEYS.forEach(function (teamName) {
+        var shareBtn = document.createElement('button');
+        shareBtn.type = 'button';
+        shareBtn.className = 'btn btn-secondary reassign-share-btn';
+        shareBtn.title = 'Re-assign ' + shortTeamName(teamName) + ' leads';
+        shareBtn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>';
+        shareBtn.addEventListener('click', function () { openReassignModal(s, teamName); });
+        reassignRow.appendChild(shareBtn);
+      });
+      card.appendChild(reassignRow);
+    } else if (layout === 'b') {
+      var head = document.createElement('div');
+      head.className = 'staff-card-head';
+      var nameDivB = document.createElement('div');
+      nameDivB.className = 'staff-card-name';
+      nameDivB.textContent = name;
+      head.appendChild(nameDivB);
+      head.appendChild(availLabel);
+      head.appendChild(document.createTextNode(' Pause '));
+      head.appendChild(pauseSelect);
+      if (s.on_holiday_today) {
+        var h = document.createElement('span');
+        h.className = 'availability-holiday-icon';
+        h.title = 'On holiday';
+        h.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 2v4M16 2v4M3 10h18M5 4h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z"/></svg>';
+        head.appendChild(h);
+      }
+      card.appendChild(head);
+      var sectTeams = document.createElement('div');
+      sectTeams.appendChild(document.createElement('div'));
+      sectTeams.lastChild.className = 'staff-card-section-title';
+      sectTeams.lastChild.textContent = 'Teams & open leads';
+      var teamsGrid = document.createElement('div');
+      teamsGrid.className = 'staff-card-teams';
+      LEAD_TEAM_KEYS.forEach(function (teamName, idx) {
+        var row = document.createElement('div');
+        row.className = 'staff-card-team-row';
+        row.appendChild(document.createTextNode(shortTeamName(teamName) + ' '));
+        row.appendChild(createTeamButtonForCard(s, teamName));
+        var num = document.createElement('span');
+        num.textContent = openCounts[idx] + ' open';
+        num.style.marginLeft = 'auto';
+        row.appendChild(num);
+        teamsGrid.appendChild(row);
+      });
+      sectTeams.appendChild(teamsGrid);
+      card.appendChild(sectTeams);
+      var sectReassign = document.createElement('div');
+      sectReassign.appendChild(document.createElement('div'));
+      sectReassign.lastChild.className = 'staff-card-section-title';
+      sectReassign.lastChild.textContent = 'Re-assign leads';
+      sectReassign.className = 'staff-card-reassign';
+      LEAD_TEAM_KEYS.forEach(function (teamName) {
+        var shareBtn = document.createElement('button');
+        shareBtn.type = 'button';
+        shareBtn.className = 'btn btn-secondary reassign-share-btn';
+        shareBtn.title = 'Re-assign ' + shortTeamName(teamName);
+        shareBtn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>';
+        shareBtn.addEventListener('click', function () { openReassignModal(s, teamName); });
+        sectReassign.appendChild(shareBtn);
+      });
+      card.appendChild(sectReassign);
+    } else {
+      var left = document.createElement('div');
+      left.className = 'staff-card-left';
+      var nameDivC = document.createElement('div');
+      nameDivC.className = 'staff-card-name';
+      nameDivC.textContent = name;
+      left.appendChild(nameDivC);
+      var totalOpenEl = document.createElement('div');
+      totalOpenEl.className = 'staff-card-c-total-open';
+      totalOpenEl.textContent = totalOpen === 1 ? '1 open lead' : totalOpen + ' open leads';
+      left.appendChild(totalOpenEl);
+      left.appendChild(gaugeWrap);
+      var availBlock = document.createElement('div');
+      availBlock.className = 'staff-card-c-availability-block';
+      var availTitle = document.createElement('span');
+      availTitle.className = 'staff-card-c-availability-label';
+      availTitle.textContent = 'Availability';
+      availBlock.appendChild(availTitle);
+      availBlock.appendChild(availLabel);
+      left.appendChild(availBlock);
+      var pauseBlock = document.createElement('div');
+      pauseBlock.className = 'staff-card-c-pause-block';
+      var pauseRow = document.createElement('div');
+      pauseRow.appendChild(document.createTextNode('Pause '));
+      pauseRow.appendChild(pauseSelect);
+      pauseBlock.appendChild(pauseRow);
+      left.appendChild(pauseBlock);
+      if (s.on_holiday_today) {
+        var hl = document.createElement('span');
+        hl.className = 'availability-holiday-icon';
+        hl.title = 'On holiday';
+        hl.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 2v4M16 2v4M3 10h18M5 4h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z"/></svg>';
+        left.appendChild(hl);
+      }
+      card.appendChild(left);
+      var right = document.createElement('div');
+      right.className = 'staff-card-right';
+      var tbl = document.createElement('table');
+      var thead = document.createElement('thead');
+      thead.innerHTML = '<tr><th>Team</th><th></th><th>Open</th><th>Re-assign</th></tr>';
+      tbl.appendChild(thead);
+      var tbody = document.createElement('tbody');
+      LEAD_TEAM_KEYS.forEach(function (teamName, idx) {
+        var tr = document.createElement('tr');
+        tr.innerHTML = '<td>' + shortTeamName(teamName) + '</td><td></td><td>' + openCounts[idx] + '</td><td></td>';
+        tr.querySelector('td:nth-child(2)').appendChild(createTeamButtonForCard(s, teamName));
+        var shareBtn = document.createElement('button');
+        shareBtn.type = 'button';
+        shareBtn.className = 'btn btn-secondary reassign-share-btn';
+        shareBtn.title = 'Re-assign ' + shortTeamName(teamName);
+        shareBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>';
+        shareBtn.addEventListener('click', function () { openReassignModal(s, teamName); });
+        tr.querySelector('td:nth-child(4)').appendChild(shareBtn);
+        tbody.appendChild(tr);
+      });
+      tbl.appendChild(tbody);
+      right.appendChild(tbl);
+      card.appendChild(right);
+    }
+    return card;
+  }
+
+  function renderStaffCards(layoutKey, active, inactive, pauseLeadsOptions) {
+    var activeEl = document.getElementById('staff-cards-active');
+    var inactiveEl = document.getElementById('staff-cards-inactive');
+    if (!activeEl || !inactiveEl) return;
+    activeEl.innerHTML = '';
+    inactiveEl.innerHTML = '';
+    var layout = layoutKey === 'cards-a' ? 'a' : layoutKey === 'cards-b' ? 'b' : 'c';
+    active.forEach(function (s) { activeEl.appendChild(buildStaffCard(layout, s, pauseLeadsOptions)); });
+    inactive.forEach(function (s) { inactiveEl.appendChild(buildStaffCard(layout, s, pauseLeadsOptions)); });
+  }
+
   var reassignState = { staff: null, team: null, preview: null };
 
   function openReassignModal(staff, teamName) {
@@ -1049,12 +1374,27 @@
         const inactive = staff.filter(function (s) {
           return (s.availability || '').toLowerCase() === 'unavailable';
         });
-        activeTbody.innerHTML = '';
-        inactiveTbody.innerHTML = '';
-        active.forEach(function (s) { renderStaffRow(s, activeTbody, pauseLeadsOptions); });
-        inactive.forEach(function (s) { renderStaffRow(s, inactiveTbody, pauseLeadsOptions); });
-        activeSection.hidden = active.length === 0;
-        inactiveSection.hidden = inactive.length === 0;
+        var layoutSelect = document.getElementById('staff-layout-select');
+        var tableWrap = document.getElementById('staff-table-wrap');
+        var cardsWrap = document.getElementById('staff-cards-wrap');
+        var layout = layoutSelect ? layoutSelect.value : 'table';
+
+        if (layout !== 'table' && (layout === 'cards-a' || layout === 'cards-b' || layout === 'cards-c')) {
+          if (tableWrap) tableWrap.classList.add('hidden');
+          if (cardsWrap) { cardsWrap.hidden = false; }
+          renderStaffCards(layout, active, inactive, pauseLeadsOptions);
+        } else {
+          if (tableWrap) tableWrap.classList.remove('hidden');
+          if (cardsWrap) cardsWrap.hidden = true;
+          activeTbody.innerHTML = '';
+          inactiveTbody.innerHTML = '';
+          active.forEach(function (s) { renderStaffRow(s, activeTbody, pauseLeadsOptions); });
+          inactive.forEach(function (s) { renderStaffRow(s, inactiveTbody, pauseLeadsOptions); });
+        }
+        if (layout === 'table') {
+          activeSection.hidden = active.length === 0;
+          inactiveSection.hidden = inactive.length === 0;
+        }
       })
       .catch(function (e) {
         loading.hidden = true;
@@ -1063,12 +1403,26 @@
       });
   }
 
+  (function initStaffLayout() {
+    var sel = document.getElementById('staff-layout-select');
+    if (!sel) return;
+    var saved = localStorage.getItem('staffLayout');
+    if (saved && ['table', 'cards-a', 'cards-b', 'cards-c'].indexOf(saved) >= 0) sel.value = saved;
+    sel.addEventListener('change', function () {
+      localStorage.setItem('staffLayout', this.value);
+      staffTable();
+    });
+  })();
+
   function renderStaffTableFromCache() {
+    var layoutSelect = document.getElementById('staff-layout-select');
+    var layout = layoutSelect ? layoutSelect.value : 'table';
+    var tableWrap = document.getElementById('staff-table-wrap');
+    var cardsWrap = document.getElementById('staff-cards-wrap');
     var activeSection = document.getElementById('staff-active-section');
     var inactiveSection = document.getElementById('staff-inactive-section');
     var activeTbody = document.querySelector('#staff-table-active tbody');
     var inactiveTbody = document.querySelector('#staff-table-inactive tbody');
-    if (!activeTbody || !inactiveTbody) return;
     var staff = staffCache || [];
     var active = staff.filter(function (s) {
       return (s.availability || '').toLowerCase() !== 'unavailable';
@@ -1076,12 +1430,20 @@
     var inactive = staff.filter(function (s) {
       return (s.availability || '').toLowerCase() === 'unavailable';
     });
-    activeTbody.innerHTML = '';
-    inactiveTbody.innerHTML = '';
-    active.forEach(function (s) { renderStaffRow(s, activeTbody, lastPauseLeadsOptions); });
-    inactive.forEach(function (s) { renderStaffRow(s, inactiveTbody, lastPauseLeadsOptions); });
-    activeSection.hidden = active.length === 0;
-    inactiveSection.hidden = inactive.length === 0;
+    if (layout !== 'table' && (layout === 'cards-a' || layout === 'cards-b' || layout === 'cards-c')) {
+      if (tableWrap) tableWrap.classList.add('hidden');
+      if (cardsWrap) { cardsWrap.hidden = false; renderStaffCards(layout, active, inactive, lastPauseLeadsOptions); }
+    } else {
+      if (tableWrap) tableWrap.classList.remove('hidden');
+      if (cardsWrap) cardsWrap.hidden = true;
+      if (!activeTbody || !inactiveTbody) return;
+      activeTbody.innerHTML = '';
+      inactiveTbody.innerHTML = '';
+      active.forEach(function (s) { renderStaffRow(s, activeTbody, lastPauseLeadsOptions); });
+      inactive.forEach(function (s) { renderStaffRow(s, inactiveTbody, lastPauseLeadsOptions); });
+      if (activeSection) activeSection.hidden = active.length === 0;
+      if (inactiveSection) inactiveSection.hidden = inactive.length === 0;
+    }
   }
 
   function dryRunForm() {

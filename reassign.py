@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import logging
 from datetime import date, datetime
-from typing import Any
+from typing import Any, Optional
 
 from hubspot_client import HubSpotClient
 from config import (
@@ -56,7 +56,7 @@ def _parse_tag_ids(raw: Any) -> set[str]:
     return set(t.strip() for t in s.replace(";", ",").split(",") if t.strip())
 
 
-def _parse_date(raw: Any) -> date | None:
+def _parse_date(raw: Any) -> Optional[date]:
     """Parse call_back_date to date. Return None if invalid or missing."""
     if raw is None:
         return None
@@ -69,7 +69,7 @@ def _parse_date(raw: Any) -> date | None:
         return None
 
 
-def _is_future(d: date | None) -> bool:
+def _is_future(d: Optional[date]) -> bool:
     if d is None:
         return False
     return d > date.today()
@@ -235,7 +235,7 @@ def execute_reassign(
     owner_id: str,
     team_name: str,
     categories: list[str],
-    target_owner_ids: list[str] | None = None,
+    target_owner_ids: Optional[list[str]] = None,
 ) -> dict:
     """
     Select leads in the given categories, resolve Lead->Contact, distribute contacts

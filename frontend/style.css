@@ -421,6 +421,160 @@ code {
   color: var(--text);
 }
 
+.staff-layout-wrap {
+  margin-bottom: 0.75rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.staff-layout-label { font-size: 0.9rem; color: var(--text-muted); }
+.staff-layout-select {
+  padding: 0.35rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 0.9rem;
+  background: var(--bg);
+}
+
+.staff-table-wrap { display: block; }
+.staff-cards-wrap { display: block; }
+.staff-cards-wrap[hidden] { display: none; }
+.staff-table-wrap.hidden { display: none !important; }
+
+.staff-cards-grid {
+  display: grid;
+  gap: 1rem;
+  margin-bottom: 1.25rem;
+}
+
+/* Shared card base */
+.staff-card {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 1rem;
+  background: var(--card);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+}
+.staff-card .staff-card-name { font-weight: 600; font-size: 1.05rem; margin-bottom: 0.5rem; }
+.staff-card .temp-gauge-wrap { margin: 0; }
+.staff-card .team-tick-btn,
+.staff-card .team-add-btn { margin: 0 0.15rem; }
+
+/* Design A – Compact card: name + gauge top, teams row, availability + pause, reassign row */
+.staff-card.staff-card-a {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+.staff-card-a .staff-card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+.staff-card-a .staff-card-teams {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+.staff-card-a .staff-card-team-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.25rem 0.5rem;
+  background: var(--bg-soft, #f5f5f5);
+  border-radius: 6px;
+  font-size: 0.85rem;
+}
+.staff-card-a .staff-card-team-pill .open-num { color: var(--text-muted); margin-left: 0.2rem; }
+.staff-card-a .staff-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 1rem;
+}
+.staff-card-a .staff-card-reassign {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+.staff-card-a .staff-card-reassign .reassign-label { font-size: 0.85rem; color: var(--text-muted); margin-right: 0.25rem; }
+
+/* Design B – Stacked sections with clear headings */
+.staff-card.staff-card-b {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+.staff-card-b .staff-card-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+}
+.staff-card-b .staff-card-section-title { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-muted); margin: 0.5rem 0 0.25rem 0; }
+.staff-card-b .staff-card-teams {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 0.5rem;
+}
+.staff-card-b .staff-card-team-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.35rem 0.5rem;
+  background: var(--bg-soft, #f5f5f5);
+  border-radius: 6px;
+  font-size: 0.9rem;
+}
+.staff-card-b .staff-card-reassign { display: flex; flex-wrap: wrap; gap: 0.35rem; align-items: center; }
+.staff-card-b .staff-card-reassign .reassign-label { font-size: 0.85rem; color: var(--text-muted); width: 100%; }
+
+/* Design C – Side-by-side: left = name/gauge/availability/pause, right = teams table */
+.staff-card.staff-card-c {
+  display: grid;
+  grid-template-columns: 180px 1fr;
+  gap: 1rem;
+}
+@media (max-width: 520px) {
+  .staff-card.staff-card-c { grid-template-columns: 1fr; }
+}
+.staff-card-c .staff-card-left {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.staff-card-c .staff-card-c-availability-block {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.staff-card-c .staff-card-c-availability-label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.staff-card-c .staff-card-c-pause-block {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+.staff-card-c .staff-card-c-total-open {
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.staff-card-c .staff-card-right table { width: 100%; font-size: 0.85rem; border-collapse: collapse; }
+.staff-card-c .staff-card-right th,
+.staff-card-c .staff-card-right td { padding: 0.35rem 0.5rem; text-align: left; border-bottom: 1px solid var(--border); }
+.staff-card-c .staff-card-right th { color: var(--text-muted); font-weight: 600; }
+
 /* Scrollable table area: header stays sticky at top of this box */
 .table-scroll-wrap {
   margin-top: 0.5rem;
@@ -686,6 +840,12 @@ code {
 .pause-leads-select {
   min-width: 100px;
   max-width: 160px;
+  padding: 0.4rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--card);
+  font-size: 0.9rem;
+  color: var(--text);
 }
 
 .temp-gauge-cell {
