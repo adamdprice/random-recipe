@@ -731,7 +731,222 @@
           var emptyCell2 = document.createElement('td');
           subRow.appendChild(emptyCell2);
           tbody.appendChild(subRow);
+
+          var reassignRow = document.createElement('tr');
+          reassignRow.className = 'reassign-leads-row';
+          var reassignLabelCell = document.createElement('td');
+          reassignLabelCell.className = 'reassign-leads-label';
+          reassignLabelCell.colSpan = 1;
+          reassignLabelCell.textContent = 'Re-assign leads';
+          reassignRow.appendChild(reassignLabelCell);
+          var reassignGaugeEmpty = document.createElement('td');
+          reassignRow.appendChild(reassignGaugeEmpty);
+          var openCounts = [openInbound, openPip, openPanther, openFrosties];
+          LEAD_TEAM_KEYS.forEach(function (teamName, idx) {
+            var cell = document.createElement('td');
+            cell.className = 'reassign-leads-cell';
+            if (isInTeam(parsed, teamName)) {
+              var shareBtn = document.createElement('button');
+              shareBtn.type = 'button';
+              shareBtn.className = 'btn btn-secondary reassign-share-btn';
+              shareBtn.title = 'Re-assign ' + shortTeamName(teamName) + ' leads';
+              shareBtn.setAttribute('aria-label', 'Re-assign ' + shortTeamName(teamName) + ' leads');
+              shareBtn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>';
+              shareBtn.addEventListener('click', function () { openReassignModal(s, teamName); });
+              cell.appendChild(shareBtn);
+            }
+            reassignRow.appendChild(cell);
+          });
+          var emptyTd1 = document.createElement('td');
+          var emptyTd2 = document.createElement('td');
+          var emptyTd3 = document.createElement('td');
+          reassignRow.appendChild(emptyTd1);
+          reassignRow.appendChild(emptyTd2);
+          reassignRow.appendChild(emptyTd3);
+          tbody.appendChild(reassignRow);
   }
+
+  var reassignState = { staff: null, team: null, preview: null };
+
+  function openReassignModal(staff, teamName) {
+    var modal = document.getElementById('reassign-modal');
+    var titleEl = document.getElementById('reassign-modal-title');
+    var loadingEl = document.getElementById('reassign-loading');
+    var step1El = document.getElementById('reassign-step1');
+    var step2El = document.getElementById('reassign-step2');
+    var doneEl = document.getElementById('reassign-done');
+    var categoriesEl = document.getElementById('reassign-categories');
+    var doBtn = document.getElementById('reassign-do-btn');
+    var shortName = shortTeamName(teamName);
+    var staffName = staff.name || staff.hubspot_owner_id || 'This person';
+    reassignState.staff = staff;
+    reassignState.team = teamName;
+    reassignState.preview = null;
+    titleEl.textContent = 'Re-assign leads – ' + staffName + ' – ' + shortName;
+    loadingEl.hidden = false;
+    step1El.hidden = true;
+    step2El.hidden = true;
+    doneEl.hidden = true;
+    modal.hidden = false;
+
+    fetch(API + '/reassign/preview?owner_id=' + encodeURIComponent(staff.hubspot_owner_id) + '&team=' + encodeURIComponent(teamName))
+      .then(parseJsonResponse)
+      .then(function (data) {
+        loadingEl.hidden = true;
+        if (data.error) {
+          alert('Error: ' + data.error);
+          modal.hidden = true;
+          return;
+        }
+        reassignState.preview = data;
+        var counts = data.counts || {};
+        var labels = { attempt_1: 'Attempt 1', attempt_2: 'Attempt 2', attempt_3: 'Attempt 3', call_back: 'Call Back' };
+        categoriesEl.innerHTML = '';
+        ['attempt_1', 'attempt_2', 'attempt_3', 'call_back'].forEach(function (key) {
+          var label = document.createElement('label');
+          label.className = 'reassign-category-label';
+          var cb = document.createElement('input');
+          cb.type = 'checkbox';
+          cb.className = 'reassign-category-cb';
+          cb.setAttribute('data-category', key);
+          var n = counts[key] != null ? counts[key] : 0;
+          label.appendChild(cb);
+          label.appendChild(document.createTextNode(' ' + (labels[key] || key) + ' — ' + n + ' lead(s)'));
+          categoriesEl.appendChild(label);
+        });
+        doBtn.disabled = true;
+        categoriesEl.querySelectorAll('.reassign-category-cb').forEach(function (cb) {
+          cb.addEventListener('change', function () {
+            var any = categoriesEl.querySelectorAll('.reassign-category-cb:checked').length > 0;
+            doBtn.disabled = !any;
+          });
+        });
+        step1El.hidden = false;
+      })
+      .catch(function (e) {
+        loadingEl.hidden = true;
+        alert('Error: ' + (e.message || 'Failed to load'));
+        modal.hidden = true;
+      });
+  }
+
+  function reassignUpdateConfirmButton() {
+    var listEl = document.getElementById('reassign-target-list');
+    var confirmBtn = document.getElementById('reassign-confirm-btn');
+    if (!listEl || !confirmBtn) return;
+    var checked = listEl.querySelectorAll('.reassign-staff-cb:checked');
+    confirmBtn.disabled = checked.length === 0;
+  }
+
+  function reassignShowStep2() {
+    var categoriesEl = document.getElementById('reassign-categories');
+    var selected = [];
+    categoriesEl.querySelectorAll('.reassign-category-cb:checked').forEach(function (cb) {
+      selected.push(cb.getAttribute('data-category'));
+    });
+    if (selected.length === 0) return;
+    var preview = reassignState.preview;
+    var targetStaff = (preview && preview.target_staff) || [];
+    var total = 0;
+    var counts = preview.counts || {};
+    selected.forEach(function (c) { total += (counts[c] != null ? counts[c] : 0); });
+    document.getElementById('reassign-step1').hidden = true;
+    document.getElementById('reassign-step2').hidden = false;
+    document.getElementById('reassign-done').hidden = true;
+    document.getElementById('reassign-confirm-msg').textContent = 'You are about to re-assign ' + total + ' lead(s). Choose who will receive them (sorted by most open leads first):';
+    var listEl = document.getElementById('reassign-target-list');
+    listEl.innerHTML = '';
+    if (targetStaff.length === 0) {
+      listEl.innerHTML = '<li class="empty">No available staff in this team.</li>';
+    } else {
+      targetStaff.forEach(function (s) {
+        var li = document.createElement('li');
+        li.className = 'reassign-target-item';
+        var cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.className = 'reassign-staff-cb';
+        cb.checked = true;
+        cb.setAttribute('data-owner-id', s.hubspot_owner_id || '');
+        cb.addEventListener('change', reassignUpdateConfirmButton);
+        var label = document.createElement('label');
+        label.appendChild(cb);
+        var n = s.total_open_leads != null ? s.total_open_leads : 0;
+        label.appendChild(document.createTextNode(' ' + (s.name || s.hubspot_owner_id) + ' — ' + n + ' open lead(s)'));
+        li.appendChild(label);
+        listEl.appendChild(li);
+      });
+    }
+    reassignState.selectedCategories = selected;
+    reassignUpdateConfirmButton();
+  }
+
+  function reassignExecute() {
+    var staff = reassignState.staff;
+    var team = reassignState.team;
+    var categories = reassignState.selectedCategories;
+    if (!staff || !team || !categories || categories.length === 0) return;
+    var listEl = document.getElementById('reassign-target-list');
+    var targetOwnerIds = [];
+    if (listEl) {
+      listEl.querySelectorAll('.reassign-staff-cb:checked').forEach(function (cb) {
+        var id = cb.getAttribute('data-owner-id');
+        if (id) targetOwnerIds.push(id);
+      });
+    }
+    if (targetOwnerIds.length === 0) {
+      alert('Select at least one team member to receive leads.');
+      return;
+    }
+    var confirmBtn = document.getElementById('reassign-confirm-btn');
+    confirmBtn.disabled = true;
+    confirmBtn.textContent = 'Reassigning…';
+    fetch(API + '/reassign/execute', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        owner_id: staff.hubspot_owner_id,
+        team: team,
+        categories: categories,
+        target_owner_ids: targetOwnerIds,
+      }),
+    })
+      .then(parseJsonResponse)
+      .then(function (data) {
+        document.getElementById('reassign-step2').hidden = true;
+        var doneEl = document.getElementById('reassign-done');
+        var msgEl = document.getElementById('reassign-done-msg');
+        msgEl.textContent = data.error ? ('Error: ' + data.error) : ('Re-assigned ' + (data.reassigned || 0) + ' lead(s).');
+        doneEl.hidden = false;
+        if (!data.error) staffTable();
+      })
+      .catch(function (e) {
+        alert('Error: ' + (e.message || 'Request failed'));
+      })
+      .finally(function () {
+        confirmBtn.disabled = false;
+        confirmBtn.textContent = 'Confirm';
+      });
+  }
+
+  (function wireReassignModal() {
+    var modal = document.getElementById('reassign-modal');
+    if (!modal) return;
+    var doBtn = document.getElementById('reassign-do-btn');
+    if (doBtn) doBtn.addEventListener('click', reassignShowStep2);
+    var cancel1 = document.getElementById('reassign-cancel-1');
+    if (cancel1) cancel1.addEventListener('click', function () { modal.hidden = true; });
+    var backBtn = document.getElementById('reassign-back-btn');
+    if (backBtn) backBtn.addEventListener('click', function () {
+      document.getElementById('reassign-step2').hidden = true;
+      document.getElementById('reassign-step1').hidden = false;
+    });
+    var confirmBtn = document.getElementById('reassign-confirm-btn');
+    if (confirmBtn) confirmBtn.addEventListener('click', reassignExecute);
+    var closeBtn = document.getElementById('reassign-close-btn');
+    if (closeBtn) closeBtn.addEventListener('click', function () { modal.hidden = true; staffTable(); });
+    var backdrop = modal.querySelector('.modal-backdrop');
+    if (backdrop) backdrop.addEventListener('click', function () { modal.hidden = true; });
+  })();
 
   function renderCallActivityChart(staff) {
     const container = document.getElementById('call-activity-chart');

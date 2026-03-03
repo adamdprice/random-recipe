@@ -99,16 +99,42 @@ class HubSpotClient:
         filter_groups: list[dict],
         properties: list[str],
         limit: int = 200,
+        after: Optional[str] = None,
     ) -> dict:
-        return self._request(
+        body = {
+            "filterGroups": filter_groups,
+            "properties": properties,
+            "limit": limit,
+        }
+        if after:
+            body["after"] = after
+        return self._request("POST", "/crm/v3/objects/leads/search", json=body)
+
+    def get_lead_to_contact_associations_batch(self, lead_ids: list[str]) -> dict:
+        """Get associated contact IDs for each lead. POST /crm/v4/associations/leads/contacts/batch/read.
+        Returns dict: { lead_id: [contact_id, ...], ... }. Leads with no contact are omitted or have [].
+        """
+        if not lead_ids:
+            return {}
+        # API accepts up to 1000 per request
+        chunk = lead_ids[:1000]
+        body = {"inputs": [{"id": str(lid)} for lid in chunk]}
+        result = self._request(
             "POST",
-            "/crm/v3/objects/leads/search",
-            json={
-                "filterGroups": filter_groups,
-                "properties": properties,
-                "limit": limit,
-            },
+            "/crm/v4/associations/leads/contacts/batch/read",
+            json=body,
         )
+        out = {str(lid): [] for lid in chunk}
+        for item in result.get("results", []):
+            from_id = item.get("from", {}).get("id")
+            to_list = item.get("to", [])
+            if from_id is not None:
+                out.setdefault(str(from_id), [])
+                for to_obj in to_list:
+                    to_id = to_obj.get("toObjectId") or to_obj.get("id")
+                    if to_id is not None and str(to_id) not in out[str(from_id)]:
+                        out[str(from_id)].append(str(to_id))
+        return out
 
     # --- Custom object property schema (for dropdown options) ---
     def get_custom_object_property(self, object_type_id: str, property_name: str) -> dict:

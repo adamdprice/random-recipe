@@ -1307,6 +1307,66 @@ def distribute():
         return jsonify({"error": str(e)}), 500
 
 
+# --- Re-assign leads (redistribute another person's leads to available team members) ---
+@app.route("/api/reassign/preview", methods=["GET"])
+def reassign_preview():
+    """GET ?owner_id=...&team=... (team = full name e.g. Inbound Lead Team). Returns counts and target_staff."""
+    owner_id = (request.args.get("owner_id") or "").strip()
+    team = (request.args.get("team") or "").strip()
+    if not owner_id or not team:
+        return jsonify({"error": "owner_id and team required"}), 400
+    try:
+        from reassign import get_reassign_preview
+        from config import STAFF_LEAD_TEAMS
+        if team not in STAFF_LEAD_TEAMS:
+            return jsonify({"error": "invalid team"}), 400
+        client = get_client()
+        out = get_reassign_preview(client, owner_id, team)
+        return jsonify(out)
+    except Exception as e:
+        _log.exception("reassign preview failed")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/reassign/execute", methods=["POST"])
+def reassign_execute():
+    """POST { owner_id, team, categories, target_owner_ids (optional) }. Reassigns contacts to selected staff only."""
+    data = request.get_json() or {}
+    owner_id = (data.get("owner_id") or "").strip()
+    team = (data.get("team") or "").strip()
+    categories = data.get("categories")
+    if not isinstance(categories, list):
+        categories = []
+    categories = [c for c in categories if c in ("attempt_1", "attempt_2", "attempt_3", "call_back")]
+    target_owner_ids = data.get("target_owner_ids")
+    if isinstance(target_owner_ids, list):
+        target_owner_ids = [str(o).strip() for o in target_owner_ids if o]
+    else:
+        target_owner_ids = None
+    if not owner_id or not team:
+        return jsonify({"error": "owner_id and team required"}), 400
+    if not categories:
+        return jsonify({"error": "at least one category required"}), 400
+    try:
+        from reassign import execute_reassign
+        from config import STAFF_LEAD_TEAMS
+        if team not in STAFF_LEAD_TEAMS:
+            return jsonify({"error": "invalid team"}), 400
+        client = get_client()
+        result = execute_reassign(client, owner_id, team, categories, target_owner_ids=target_owner_ids)
+        if result.get("error"):
+            return jsonify({"error": result["error"], "reassigned": 0, "assignments": []}), 400
+        _log_activity(
+            "reassign",
+            f"Reassigned {result['reassigned']} lead(s) from {owner_id} ({team})",
+            {"owner_id": owner_id, "team": team, "reassigned": result["reassigned"], "assignments": result["assignments"][:50]},
+        )
+        return jsonify({"reassigned": result["reassigned"], "assignments": result["assignments"]})
+    except Exception as e:
+        _log.exception("reassign execute failed")
+        return jsonify({"error": str(e)}), 500
+
+
 # Ensure API errors never return HTML (so frontend never sees "Unexpected token '<'" from our app)
 @app.errorhandler(500)
 def api_500_json(e):

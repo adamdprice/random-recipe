@@ -44,3 +44,30 @@ HS_LEAD_TYPES = {
     "frosties": "Frosties lead",
     "panther": "Panther Lead",
 }
+
+# Staff lead_teams (multi-select) options; used to match staff to lead type for re-assign
+STAFF_LEAD_TEAMS = [
+    "Frosties Lead Team",
+    "Inbound Lead Team",
+    "Panther Lead Team",
+    "PIP Lead Team",
+]
+
+# Re-assign: map Staff team name -> hs_lead_type value for filtering leads
+HS_LEAD_TYPE_BY_TEAM = {
+    "Inbound Lead Team": "Inbound Lead",
+    "PIP Lead Team": "PIP Lead",
+    "Panther Lead Team": "Panther Lead",
+    "Frosties Lead Team": "Frosties lead",
+}
+
+# Re-assign: pipeline stages to search (leads stay in their current stage; we only search within these)
+REASSIGN_PIPELINE_STAGES = ["new-stage-id", "attempting-stage-id", "connected-stage-id"]
+
+# Re-assign: Lead property for callback; if future date, lead counts only in Call Back category
+REASSIGN_CALL_BACK_DATE_PROPERTY = "call_back_date"
+
+# Re-assign: hs_tag_ids values for Attempt 1, 2, 3 (Lead object)
+REASSIGN_TAG_ATTEMPT_1 = "37295391"
+REASSIGN_TAG_ATTEMPT_2 = "37295488"
+REASSIGN_TAG_ATTEMPT_3 = "37295491"

@@ -278,6 +278,34 @@
     </div>
   </div>
 
+  <div id="reassign-modal" class="modal" hidden aria-modal="true" role="dialog" aria-labelledby="reassign-modal-title">
+    <div class="modal-backdrop" data-close="reassign-modal"></div>
+    <div class="modal-dialog card reassign-dialog">
+      <h2 id="reassign-modal-title" class="section-head">Re-assign leads</h2>
+      <div id="reassign-loading" class="loading" hidden>Loading…</div>
+      <div id="reassign-step1" class="reassign-step" hidden>
+        <p class="hint">Select which lead categories to re-assign. Then click Re-assign to see who will receive them.</p>
+        <div id="reassign-categories" class="reassign-categories"></div>
+        <div class="modal-actions" style="margin-top: 1rem;">
+          <button type="button" id="reassign-do-btn" class="btn" disabled>Re-assign</button>
+          <button type="button" id="reassign-cancel-1" class="btn btn-secondary">Cancel</button>
+        </div>
+      </div>
+      <div id="reassign-step2" class="reassign-step" hidden>
+        <p id="reassign-confirm-msg" class="reassign-confirm-msg"></p>
+        <ul id="reassign-target-list" class="reassign-target-list"></ul>
+        <div class="modal-actions" style="margin-top: 1rem;">
+          <button type="button" id="reassign-confirm-btn" class="btn">Confirm</button>
+          <button type="button" id="reassign-back-btn" class="btn btn-secondary">Go back</button>
+        </div>
+      </div>
+      <div id="reassign-done" class="reassign-done" hidden>
+        <p id="reassign-done-msg" class="reassign-done-msg"></p>
+        <button type="button" id="reassign-close-btn" class="btn">Close</button>
+      </div>
+    </div>
+  </div>
+
   <div id="create-staff-modal" class="modal" hidden aria-modal="true" role="dialog" aria-labelledby="create-staff-modal-title">
     <div class="modal-backdrop" data-close="create-staff-modal"></div>
     <div class="modal-dialog card holidays-dialog">
