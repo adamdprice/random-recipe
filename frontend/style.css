@@ -569,6 +569,7 @@ code {
   font-weight: 700;
   color: var(--text);
   font-variant-numeric: tabular-nums;
+  margin-top: -0.25rem;
 }
 .staff-card-c .staff-card-right table { width: 100%; font-size: 0.85rem; border-collapse: collapse; }
 .staff-card-c .staff-card-right th,

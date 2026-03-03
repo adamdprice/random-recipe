@@ -1374,27 +1374,11 @@
         const inactive = staff.filter(function (s) {
           return (s.availability || '').toLowerCase() === 'unavailable';
         });
-        var layoutSelect = document.getElementById('staff-layout-select');
         var tableWrap = document.getElementById('staff-table-wrap');
         var cardsWrap = document.getElementById('staff-cards-wrap');
-        var layout = layoutSelect ? layoutSelect.value : 'table';
-
-        if (layout !== 'table' && (layout === 'cards-a' || layout === 'cards-b' || layout === 'cards-c')) {
-          if (tableWrap) tableWrap.classList.add('hidden');
-          if (cardsWrap) { cardsWrap.hidden = false; }
-          renderStaffCards(layout, active, inactive, pauseLeadsOptions);
-        } else {
-          if (tableWrap) tableWrap.classList.remove('hidden');
-          if (cardsWrap) cardsWrap.hidden = true;
-          activeTbody.innerHTML = '';
-          inactiveTbody.innerHTML = '';
-          active.forEach(function (s) { renderStaffRow(s, activeTbody, pauseLeadsOptions); });
-          inactive.forEach(function (s) { renderStaffRow(s, inactiveTbody, pauseLeadsOptions); });
-        }
-        if (layout === 'table') {
-          activeSection.hidden = active.length === 0;
-          inactiveSection.hidden = inactive.length === 0;
-        }
+        if (tableWrap) tableWrap.classList.add('hidden');
+        if (cardsWrap) { cardsWrap.hidden = false; }
+        renderStaffCards('cards-c', active, inactive, pauseLeadsOptions);
       })
       .catch(function (e) {
         loading.hidden = true;
@@ -1403,26 +1387,9 @@
       });
   }
 
-  (function initStaffLayout() {
-    var sel = document.getElementById('staff-layout-select');
-    if (!sel) return;
-    var saved = localStorage.getItem('staffLayout');
-    if (saved && ['table', 'cards-a', 'cards-b', 'cards-c'].indexOf(saved) >= 0) sel.value = saved;
-    sel.addEventListener('change', function () {
-      localStorage.setItem('staffLayout', this.value);
-      staffTable();
-    });
-  })();
-
   function renderStaffTableFromCache() {
-    var layoutSelect = document.getElementById('staff-layout-select');
-    var layout = layoutSelect ? layoutSelect.value : 'table';
     var tableWrap = document.getElementById('staff-table-wrap');
     var cardsWrap = document.getElementById('staff-cards-wrap');
-    var activeSection = document.getElementById('staff-active-section');
-    var inactiveSection = document.getElementById('staff-inactive-section');
-    var activeTbody = document.querySelector('#staff-table-active tbody');
-    var inactiveTbody = document.querySelector('#staff-table-inactive tbody');
     var staff = staffCache || [];
     var active = staff.filter(function (s) {
       return (s.availability || '').toLowerCase() !== 'unavailable';
@@ -1430,20 +1397,8 @@
     var inactive = staff.filter(function (s) {
       return (s.availability || '').toLowerCase() === 'unavailable';
     });
-    if (layout !== 'table' && (layout === 'cards-a' || layout === 'cards-b' || layout === 'cards-c')) {
-      if (tableWrap) tableWrap.classList.add('hidden');
-      if (cardsWrap) { cardsWrap.hidden = false; renderStaffCards(layout, active, inactive, lastPauseLeadsOptions); }
-    } else {
-      if (tableWrap) tableWrap.classList.remove('hidden');
-      if (cardsWrap) cardsWrap.hidden = true;
-      if (!activeTbody || !inactiveTbody) return;
-      activeTbody.innerHTML = '';
-      inactiveTbody.innerHTML = '';
-      active.forEach(function (s) { renderStaffRow(s, activeTbody, lastPauseLeadsOptions); });
-      inactive.forEach(function (s) { renderStaffRow(s, inactiveTbody, lastPauseLeadsOptions); });
-      if (activeSection) activeSection.hidden = active.length === 0;
-      if (inactiveSection) inactiveSection.hidden = inactive.length === 0;
-    }
+    if (tableWrap) tableWrap.classList.add('hidden');
+    if (cardsWrap) { cardsWrap.hidden = false; renderStaffCards('cards-c', active, inactive, lastPauseLeadsOptions); }
   }
 
   function dryRunForm() {
