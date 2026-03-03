@@ -745,14 +745,16 @@
           LEAD_TEAM_KEYS.forEach(function (teamName, idx) {
             var cell = document.createElement('td');
             cell.className = 'reassign-leads-cell';
-            var shareBtn = document.createElement('button');
-            shareBtn.type = 'button';
-            shareBtn.className = 'btn btn-secondary reassign-share-btn';
-            shareBtn.title = 'Re-assign ' + shortTeamName(teamName) + ' leads for this person';
-            shareBtn.setAttribute('aria-label', 'Re-assign ' + shortTeamName(teamName) + ' leads');
-            shareBtn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>';
-            shareBtn.addEventListener('click', function () { openReassignModal(s, teamName); });
-            cell.appendChild(shareBtn);
+            if (openCounts[idx] > 0) {
+              var shareBtn = document.createElement('button');
+              shareBtn.type = 'button';
+              shareBtn.className = 'btn btn-secondary reassign-share-btn';
+              shareBtn.title = 'Re-assign ' + shortTeamName(teamName) + ' leads for this person';
+              shareBtn.setAttribute('aria-label', 'Re-assign ' + shortTeamName(teamName) + ' leads');
+              shareBtn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>';
+              shareBtn.addEventListener('click', function () { openReassignModal(s, teamName); });
+              cell.appendChild(shareBtn);
+            }
             reassignRow.appendChild(cell);
           });
           var emptyTd1 = document.createElement('td');
@@ -954,7 +956,8 @@
       rLabel.className = 'reassign-label';
       rLabel.textContent = 'Re-assign ';
       reassignRow.appendChild(rLabel);
-      LEAD_TEAM_KEYS.forEach(function (teamName) {
+      LEAD_TEAM_KEYS.forEach(function (teamName, idx) {
+        if (openCounts[idx] <= 0) return;
         var shareBtn = document.createElement('button');
         shareBtn.type = 'button';
         shareBtn.className = 'btn btn-secondary reassign-share-btn';
@@ -1006,7 +1009,8 @@
       sectReassign.lastChild.className = 'staff-card-section-title';
       sectReassign.lastChild.textContent = 'Re-assign leads';
       sectReassign.className = 'staff-card-reassign';
-      LEAD_TEAM_KEYS.forEach(function (teamName) {
+      LEAD_TEAM_KEYS.forEach(function (teamName, idx) {
+        if (openCounts[idx] <= 0) return;
         var shareBtn = document.createElement('button');
         shareBtn.type = 'button';
         shareBtn.className = 'btn btn-secondary reassign-share-btn';
@@ -1062,13 +1066,15 @@
         var tr = document.createElement('tr');
         tr.innerHTML = '<td>' + shortTeamName(teamName) + '</td><td></td><td>' + openCounts[idx] + '</td><td></td>';
         tr.querySelector('td:nth-child(2)').appendChild(createTeamButtonForCard(s, teamName));
-        var shareBtn = document.createElement('button');
-        shareBtn.type = 'button';
-        shareBtn.className = 'btn btn-secondary reassign-share-btn';
-        shareBtn.title = 'Re-assign ' + shortTeamName(teamName);
-        shareBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>';
-        shareBtn.addEventListener('click', function () { openReassignModal(s, teamName); });
-        tr.querySelector('td:nth-child(4)').appendChild(shareBtn);
+        if (openCounts[idx] > 0) {
+          var shareBtn = document.createElement('button');
+          shareBtn.type = 'button';
+          shareBtn.className = 'btn btn-secondary reassign-share-btn';
+          shareBtn.title = 'Re-assign ' + shortTeamName(teamName);
+          shareBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>';
+          shareBtn.addEventListener('click', function () { openReassignModal(s, teamName); });
+          tr.querySelector('td:nth-child(4)').appendChild(shareBtn);
+        }
         tbody.appendChild(tr);
       });
       tbl.appendChild(tbody);
