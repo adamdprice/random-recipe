@@ -1516,6 +1516,16 @@
       return div.innerHTML;
     }
 
+    function syncHolidayEndDateMin() {
+      var start = startInput.value;
+      if (start) {
+        endInput.min = start;
+        if (endInput.value && endInput.value < start) endInput.value = start;
+      } else {
+        endInput.removeAttribute('min');
+      }
+    }
+
     function openAddForm(prefillStartDate) {
       formTitle.textContent = 'Add holiday';
       editIdInput.value = '';
@@ -1527,6 +1537,7 @@
       startInput.value = prefillStartDate || '';
       endInput.value = prefillStartDate || '';
       labelInput.value = '';
+      syncHolidayEndDateMin();
       renderStaffList('');
       if (viewsEl) viewsEl.hidden = true;
       formWrap.hidden = false;
@@ -1545,6 +1556,7 @@
       startInput.value = h.start_date || '';
       endInput.value = h.end_date || '';
       labelInput.value = h.label || '';
+      syncHolidayEndDateMin();
       if (viewsEl) viewsEl.hidden = true;
       formWrap.hidden = false;
       if (addBtn) addBtn.disabled = true;
@@ -1575,6 +1587,10 @@
       };
       if (!payload.start_date || !payload.end_date) {
         alert('Please set From and To dates.');
+        return;
+      }
+      if (payload.end_date < payload.start_date) {
+        alert('To date cannot be earlier than From date.');
         return;
       }
       if (!id && !staffId) {
@@ -1613,6 +1629,10 @@
       staffSearchInput.addEventListener('input', function () {
         renderStaffList(staffSearchInput.value);
       });
+    }
+    if (startInput) {
+      startInput.addEventListener('change', syncHolidayEndDateMin);
+      startInput.addEventListener('input', syncHolidayEndDateMin);
     }
     function setView(mode) {
       viewMode = mode;
