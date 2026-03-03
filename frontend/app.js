@@ -97,12 +97,12 @@
             var staffTab = document.querySelector('.tab[data-tab="staff-mgmt"]');
             if (staffTab) staffTab.click();
             setTimeout(function () {
-              var row = document.querySelector('.staff-table tr[data-staff-id="' + id + '"]');
-              if (row) {
-                row.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                row.classList.add('staff-row-highlight');
+              var card = document.querySelector('.staff-card[data-staff-id="' + id + '"]');
+              if (card) {
+                card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                card.classList.add('staff-card-highlight');
                 setTimeout(function () {
-                  row.classList.remove('staff-row-highlight');
+                  card.classList.remove('staff-card-highlight');
                 }, 1200);
               }
             }, 150);
@@ -1374,6 +1374,8 @@
         const inactive = staff.filter(function (s) {
           return (s.availability || '').toLowerCase() === 'unavailable';
         });
+        active.sort(sortStaffByFirstName);
+        inactive.sort(sortStaffByFirstName);
         var tableWrap = document.getElementById('staff-table-wrap');
         var cardsWrap = document.getElementById('staff-cards-wrap');
         if (tableWrap) tableWrap.classList.add('hidden');
@@ -1387,6 +1389,14 @@
       });
   }
 
+  function sortStaffByFirstName(a, b) {
+    var nameA = (a.name || a.hubspot_owner_id || '').trim();
+    var nameB = (b.name || b.hubspot_owner_id || '').trim();
+    var firstA = nameA.split(/\s+/)[0] || nameA;
+    var firstB = nameB.split(/\s+/)[0] || nameB;
+    return firstA.localeCompare(firstB, undefined, { sensitivity: 'base' });
+  }
+
   function renderStaffTableFromCache() {
     var tableWrap = document.getElementById('staff-table-wrap');
     var cardsWrap = document.getElementById('staff-cards-wrap');
@@ -1397,6 +1407,8 @@
     var inactive = staff.filter(function (s) {
       return (s.availability || '').toLowerCase() === 'unavailable';
     });
+    active.sort(sortStaffByFirstName);
+    inactive.sort(sortStaffByFirstName);
     if (tableWrap) tableWrap.classList.add('hidden');
     if (cardsWrap) { cardsWrap.hidden = false; renderStaffCards('cards-c', active, inactive, lastPauseLeadsOptions); }
   }

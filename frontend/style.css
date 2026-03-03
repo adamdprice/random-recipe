@@ -409,6 +409,12 @@ code {
   transition: background-color 1s ease-out;
 }
 
+.staff-card.staff-card-highlight {
+  background-color: #e0f2fe;
+  transition: background-color 1s ease-out;
+  border-radius: 6px;
+}
+
 .staff-table tr[data-staff-id],
 .staff-table tr.open-leads-row {
   transition: background-color 1s ease-out;
@@ -441,10 +447,23 @@ code {
 .staff-cards-wrap[hidden] { display: none; }
 .staff-table-wrap.hidden { display: none !important; }
 
+.staff-cards-section {
+  margin-top: 1.5rem;
+}
+.staff-cards-section:first-child {
+  margin-top: 0;
+}
+.staff-cards-section .staff-subsection-title {
+  margin-bottom: 0.5rem;
+}
+
 .staff-cards-grid {
   display: grid;
   gap: 1rem;
-  margin-bottom: 1.25rem;
+  margin-bottom: 0;
+}
+.staff-cards-section:last-child .staff-cards-grid {
+  margin-bottom: 0;
 }
 
 /* Shared card base */
