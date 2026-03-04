@@ -67,17 +67,23 @@ CORS(app)
 @app.after_request
 def _api_500_ensure_json(response):
     """If an API route returned 500 with HTML (e.g. handler was skipped), replace with JSON so frontend never sees HTML."""
+    path = ""
+    try:
+        if request:
+            path = getattr(request, "path", "") or ""
+    except Exception:
+        pass
     if (
         response.status_code == 500
-        and request.path.startswith("/api/")
+        and path.startswith("/api/")
         and response.content_type
-        and "application/json" not in response.content_type
+        and "application/json" not in (response.content_type or "")
     ):
         try:
             response.set_data(
                 json.dumps(
                     {
-                        "error": "An unexpected error occurred. Please try again.",
+                        "error": "An unexpected error occurred. Please try again. Check Railway logs for details.",
                         "updated": 0,
                         "errors": [],
                     }
@@ -988,6 +994,10 @@ def activity_log():
     return jsonify({"entries": entries})
 
 
+# Max time to wait for /api/staff when fetching from HubSpot (cache miss). Keeps response before frontend 90s timeout.
+STAFF_FETCH_TIMEOUT_SECONDS = 75
+
+
 @app.route("/api/staff", methods=["GET"])
 def list_staff():
     if request.args.get("refresh") != "1":
@@ -996,7 +1006,26 @@ def list_staff():
             return jsonify(cached)
     try:
         client = get_client()
-        out = _fetch_staff_from_hubspot(client)
+        result_holder: list = []
+        exc_holder: list = []
+
+        def fetch():
+            try:
+                result_holder.append(_fetch_staff_from_hubspot(client))
+            except Exception as e:
+                exc_holder.append(e)
+
+        thread = threading.Thread(target=fetch, daemon=True)
+        thread.start()
+        thread.join(timeout=STAFF_FETCH_TIMEOUT_SECONDS)
+        if exc_holder:
+            raise exc_holder[0]
+        if not result_holder:
+            return jsonify({
+                "error": "Staff list is taking too long to load. Try again in a moment or click Refresh.",
+                "staff": [],
+            }), 503
+        out = result_holder[0]
         _hubspot_cache_set("staff", out)
         return jsonify(out)
     except Exception as e:
@@ -1367,7 +1396,7 @@ def reassign_preview():
 @app.route("/api/reassign/execute", methods=["POST"])
 def reassign_execute():
     """POST { owner_id, team, categories, target_owner_ids (optional) }. Reassigns contacts to selected staff only."""
-    data = request.get_json() or {}
+    data = request.get_json(silent=True) or {}
     owner_id = (data.get("owner_id") or "").strip()
     team = (data.get("team") or "").strip()
     categories = data.get("categories")
@@ -1426,7 +1455,7 @@ def reassign_callbacks():
 @app.route("/api/reassign/assign-one", methods=["POST"])
 def reassign_assign_one():
     """POST { contact_id, new_owner_id, team }. Assigns a single contact to the new owner. team required so only same-team staff are allowed."""
-    data = request.get_json() or {}
+    data = request.get_json(silent=True) or {}
     contact_id = (data.get("contact_id") or "").strip() or None
     new_owner_id = (data.get("new_owner_id") or "").strip() or None
     team = (data.get("team") or "").strip() or None
@@ -1515,15 +1544,18 @@ def api_redistribute_execute():
 # Ensure API errors never return HTML (so frontend never sees "Unexpected token '<'" from our app)
 @app.errorhandler(500)
 def api_500_json(e):
+    path = ""
     try:
-        if request.path.startswith("/api/"):
-            return jsonify({
-                "error": "An unexpected error occurred. Please try again.",
-                "updated": 0,
-                "errors": [],
-            }), 500
+        if request:
+            path = getattr(request, "path", "") or ""
     except Exception:
-        pass  # fall through so after_request can fix HTML body if needed
+        pass
+    if path.startswith("/api/"):
+        return jsonify({
+            "error": "An unexpected error occurred. Please try again. Check Railway logs for details.",
+            "updated": 0,
+            "errors": [],
+        }), 500
     raise e  # non-API: let Flask's default 500 response run
 
 
