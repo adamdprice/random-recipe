@@ -1365,9 +1365,6 @@ def distribute():
 
 
 # --- Re-assign leads (redistribute another person's leads to available team members) ---
-REASSIGN_PREVIEW_TIMEOUT_SECONDS = 55  # Return JSON before typical proxy timeout (60s) so frontend never sees HTML 502
-
-
 @app.route("/api/reassign/preview", methods=["GET"])
 def reassign_preview():
     """GET ?owner_id=...&team=... (team = full name e.g. Inbound Lead Team). Returns counts and target_staff."""
@@ -1381,27 +1378,8 @@ def reassign_preview():
         if team not in STAFF_LEAD_TEAMS:
             return jsonify({"error": "invalid team"}), 400
         client = get_client()
-        result_holder: list = []
-        exc_holder: list = []
-
-        def fetch():
-            try:
-                result_holder.append(get_reassign_preview(client, owner_id, team))
-            except Exception as e:
-                exc_holder.append(e)
-
-        thread = threading.Thread(target=fetch, daemon=True)
-        thread.start()
-        thread.join(timeout=REASSIGN_PREVIEW_TIMEOUT_SECONDS)
-        if exc_holder:
-            raise exc_holder[0]
-        if not result_holder:
-            return jsonify({
-                "error": "Re-assign preview is taking too long. Try again in a moment.",
-                "counts": {},
-                "target_staff": [],
-            }), 503
-        return jsonify(result_holder[0])
+        out = get_reassign_preview(client, owner_id, team)
+        return jsonify(out)
     except Exception as e:
         _log.exception("reassign preview failed")
         return jsonify({"error": str(e)}), 500
