@@ -13,6 +13,34 @@ from typing import Any, Optional
 _log = logging.getLogger(__name__)
 
 
+def _parse_date_to_ms(raw: Any) -> Optional[int]:
+    """Parse HubSpot date (number in ms/s, or ISO string) to epoch ms. Returns None if unset or unparseable."""
+    if raw is None:
+        return None
+    if isinstance(raw, dict) and "value" in raw:
+        raw = raw["value"]
+    if raw is None:
+        return None
+    try:
+        if isinstance(raw, (int, float)):
+            ms = int(raw)
+            return ms * 1000 if ms < 1e12 else ms
+        s = str(raw).strip()
+        if not s:
+            return None
+        if s.isdigit():
+            ms = int(s)
+            return ms * 1000 if ms < 1e12 else ms
+        from datetime import datetime
+        if "T" in s or "-" in s:
+            normalized = s.replace("Z", "+00:00")[:26]
+            dt = datetime.fromisoformat(normalized)
+            return int(dt.timestamp() * 1000)
+    except (TypeError, ValueError, OverflowError):
+        pass
+    return None
+
+
 def _get_db_url() -> Optional[str]:
     return (os.getenv("DATABASE_URL") or "").strip() or None
 
@@ -127,14 +155,7 @@ def refresh_redistribute_cache(client) -> None:
                     raw_date = props.get(REDISTRIBUTE_DATE_ENTERED_PROPERTY)
                     if isinstance(raw_date, dict) and "value" in raw_date:
                         raw_date = raw_date["value"]
-                    date_ms = None
-                    if raw_date is not None:
-                        try:
-                            date_ms = int(raw_date)
-                            if date_ms < 1e12:
-                                date_ms = date_ms * 1000
-                        except (TypeError, ValueError):
-                            pass
+                    date_ms = _parse_date_to_ms(raw_date)
                     lead_date_by_id[lid] = (reason, date_ms)
                 after = (res.get("paging") or {}).get("next", {}).get("after")
                 if not after or len(results) < 100:
@@ -204,6 +225,25 @@ def get_counts_from_cache(
                     """,
                     (lead_type, since_ms),
                 )
+                rows = cur.fetchall()
+                total_with_date = sum(n for _, n in (rows or []))
+                if total_with_date == 0:
+                    # Date filter returned nothing – often means date isn't set on leads; show all-time with message
+                    cur.execute(
+                        """
+                        SELECT disqualification_reason, COUNT(*)
+                        FROM unqualified_leads_cache
+                        WHERE lead_type = %s
+                        GROUP BY disqualification_reason
+                        """,
+                        (lead_type,),
+                    )
+                    rows = cur.fetchall()
+                    counts = {r: 0 for r in REDISTRIBUTE_REASONS}
+                    for reason, n in (rows or []):
+                        if reason in counts:
+                            counts[reason] = int(n)
+                    return {"counts": counts, "date_filter_not_applied": True, "message": "Date entered isn't set for these leads; showing all-time counts."}
             else:
                 cur.execute(
                     """
@@ -214,7 +254,7 @@ def get_counts_from_cache(
                     """,
                     (lead_type,),
                 )
-            rows = cur.fetchall()
+                rows = cur.fetchall()
         counts = {r: 0 for r in REDISTRIBUTE_REASONS}
         for reason, n in (rows or []):
             if reason in counts:

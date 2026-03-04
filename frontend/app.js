@@ -238,6 +238,7 @@
         '  <input type="number" class="redistribute-last-days-input" min="1" placeholder="e.g. 30" aria-label="Number of days for ' + escapeHtml(leadType) + '" />' +
         '  <span>days (leave empty for all time)</span>' +
         '</div>' +
+        '<p class="redistribute-date-hint hint" hidden aria-live="polite"></p>' +
         '<div class="redistribute-card-loading loading" hidden>Loading…</div>' +
         '<div class="redistribute-rows" hidden>' +
         '  <table class="table redistribute-table">' +
@@ -280,6 +281,16 @@
           return;
         }
         if (!tbody) return;
+        var dateHint = card.querySelector('.redistribute-date-hint');
+        if (dateHint) {
+          if (data.date_filter_not_applied && data.message) {
+            dateHint.textContent = data.message;
+            dateHint.hidden = false;
+          } else {
+            dateHint.textContent = '';
+            dateHint.hidden = true;
+          }
+        }
         tbody.innerHTML = '';
         var counts = data.counts || {};
         REDISTRIBUTE_REASONS.forEach(function (reason) {

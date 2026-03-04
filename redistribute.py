@@ -88,6 +88,32 @@ def get_redistribute_counts(
             reason = _str(_prop_value(props, REDISTRIBUTE_DISQUALIFICATION_PROPERTY))
             if reason in counts:
                 counts[reason] += 1
+        total = sum(counts.values())
+        if last_days is not None and last_days > 0 and total == 0:
+            # Date filter returned nothing – date may not be set on leads; retry without date filter
+            filters_no_date = [f for f in filters if f.get("propertyName") != REDISTRIBUTE_DATE_ENTERED_PROPERTY]
+            filter_groups_fallback = [{"filters": filters_no_date}]
+            all_results = []
+            after = None
+            for _ in range(max_pages):
+                res = client.search_leads(
+                    filter_groups=filter_groups_fallback,
+                    properties=properties,
+                    limit=100,
+                    after=after,
+                )
+                results = res.get("results", [])
+                all_results.extend(results)
+                after = (res.get("paging") or {}).get("next", {}).get("after")
+                if not after or len(results) < 100:
+                    break
+            counts = {r: 0 for r in REDISTRIBUTE_REASONS}
+            for lead in all_results:
+                props = lead.get("properties") or {}
+                reason = _str(_prop_value(props, REDISTRIBUTE_DISQUALIFICATION_PROPERTY))
+                if reason in counts:
+                    counts[reason] += 1
+            return {"counts": counts, "date_filter_not_applied": True, "message": "Date entered isn't set for these leads; showing all-time counts."}
         return {"counts": counts}
     except Exception as e:
         _log.exception("redistribute counts failed")
