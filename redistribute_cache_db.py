@@ -319,6 +319,29 @@ def get_lead_rows_from_cache(
             pass
 
 
+def remove_lead_ids_from_cache(lead_ids: list[str]) -> None:
+    """Remove the given lead_ids from unqualified_leads_cache (e.g. after they have been re-distributed)."""
+    if not lead_ids:
+        return
+    conn = _get_connection()
+    if not conn:
+        return
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "DELETE FROM unqualified_leads_cache WHERE lead_id = ANY(%s)",
+                (list(lead_ids),),
+            )
+        _log.info("Redistribute cache: removed %s re-distributed lead(s)", len(lead_ids))
+    except Exception as e:
+        _log.warning("Redistribute cache remove_lead_ids failed: %s", e)
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
 def cache_has_data() -> bool:
     """Return True if cache table exists and has at least one row."""
     conn = _get_connection()

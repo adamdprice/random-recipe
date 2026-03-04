@@ -135,7 +135,7 @@ def execute_redistribute(
     """
     from config import REDISTRIBUTE_LEAD_TYPES
     if reason not in REDISTRIBUTE_REASONS:
-        return {"redistributed": 0, "errors": [], "error": f"Invalid reason: {reason}"}
+        return {"redistributed": 0, "errors": [], "lead_ids": [], "error": f"Invalid reason: {reason}"}
     filters = [
         {"propertyName": "hs_pipeline", "operator": "EQ", "value": REDISTRIBUTE_LEAD_PIPELINE_ID},
         {"propertyName": "hs_pipeline_stage", "operator": "EQ", "value": REDISTRIBUTE_UNQUALIFIED_STAGE_ID},
@@ -172,12 +172,13 @@ def execute_redistribute(
                 break
     except Exception as e:
         _log.exception("redistribute fetch leads failed")
-        return {"redistributed": 0, "errors": [], "error": str(e)}
+        return {"redistributed": 0, "errors": [], "lead_ids": [], "error": str(e)}
     if not all_lead_ids:
-        return {"redistributed": 0, "errors": []}
+        return {"redistributed": 0, "errors": [], "lead_ids": []}
     assoc = client.get_lead_to_contact_associations_batch(all_lead_ids)
     errors = []
     redistributed = 0
+    lead_ids_done: list[str] = []
     for lead_id in all_lead_ids:
         contact_ids = assoc.get(lead_id) or []
         contact_id = contact_ids[0] if contact_ids else None
@@ -194,9 +195,10 @@ def execute_redistribute(
                 REDISTRIBUTE_DISQUALIFICATION_PROPERTY: "",
             })
             redistributed += 1
+            lead_ids_done.append(lead_id)
         except Exception as e:
             errors.append({"lead_id": lead_id, "message": str(e)})
-    return {"redistributed": redistributed, "errors": errors}
+    return {"redistributed": redistributed, "errors": errors, "lead_ids": lead_ids_done}
 
 
 def execute_redistribute_batch(
@@ -206,10 +208,12 @@ def execute_redistribute_batch(
     """
     Re-distribute a pre-resolved list of leads (e.g. from DB cache).
     Each item: { "lead_id": str, "contact_id": str | None }.
-    Same contact/lead patches as execute_redistribute. Returns { "redistributed": n, "errors": [...] }.
+    Same contact/lead patches as execute_redistribute.
+    Returns { "redistributed": n, "errors": [...], "lead_ids": [ids that were successfully re-distributed] }.
     """
     errors = []
     redistributed = 0
+    lead_ids_done: list[str] = []
     for row in lead_rows:
         lead_id = (row.get("lead_id") or "").strip()
         contact_id = (row.get("contact_id") or "").strip() or None
@@ -228,6 +232,7 @@ def execute_redistribute_batch(
                 REDISTRIBUTE_DISQUALIFICATION_PROPERTY: "",
             })
             redistributed += 1
+            lead_ids_done.append(lead_id)
         except Exception as e:
             errors.append({"lead_id": lead_id, "message": str(e)})
-    return {"redistributed": redistributed, "errors": errors}
+    return {"redistributed": redistributed, "errors": errors, "lead_ids": lead_ids_done}

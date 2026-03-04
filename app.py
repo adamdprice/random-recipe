@@ -141,6 +141,7 @@ _redistribute_get_counts_from_cache = None
 _redistribute_get_lead_rows_from_cache = None
 _redistribute_cache_has_data = lambda: False
 _refresh_redistribute_cache_fn = None
+_redistribute_remove_lead_ids_from_cache = None
 try:
     from redistribute_cache_db import (
         init_redistribute_cache_db,
@@ -148,6 +149,7 @@ try:
         get_counts_from_cache as _redistribute_get_counts_from_cache,
         get_lead_rows_from_cache as _redistribute_get_lead_rows_from_cache,
         cache_has_data as _redistribute_cache_has_data,
+        remove_lead_ids_from_cache as _redistribute_remove_lead_ids_from_cache,
     )
     init_redistribute_cache_db()
     _redistribute_cache_available = True
@@ -1616,6 +1618,9 @@ def api_redistribute_execute():
                     if rows is not None:
                         from redistribute import execute_redistribute_batch
                         result = execute_redistribute_batch(client, rows)
+                        lead_ids_done = result.get("lead_ids") or []
+                        if lead_ids_done and _redistribute_remove_lead_ids_from_cache:
+                            _redistribute_remove_lead_ids_from_cache(lead_ids_done)
                         _log_activity(
                             "redistribute",
                             f"Re-distributed {result['redistributed']} lead(s) (reason: {reason}, from cache)",
@@ -1628,6 +1633,9 @@ def api_redistribute_execute():
         result = execute_redistribute(client, reason, last_days=last_days, lead_type=lead_type)
         if result.get("error"):
             return jsonify({"redistributed": result.get("redistributed", 0), "errors": result.get("errors", []), "error": result["error"]}), 400
+        lead_ids_done = result.get("lead_ids") or []
+        if lead_ids_done and _redistribute_remove_lead_ids_from_cache:
+            _redistribute_remove_lead_ids_from_cache(lead_ids_done)
         _log_activity(
             "redistribute",
             f"Re-distributed {result['redistributed']} lead(s) (reason: {reason})",
