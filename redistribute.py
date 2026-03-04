@@ -17,8 +17,6 @@ from config import (
     REDISTRIBUTE_DATE_ENTERED_PROPERTY,
     REDISTRIBUTE_REASONS,
     REDISTRIBUTE_OPEN_LEAD_STATUS,
-    REDISTRIBUTE_STAGING_NAME_CONTAINS,
-    REDISTRIBUTE_LEAD_NAME_PROPERTY,
 )
 
 _log = logging.getLogger(__name__)
@@ -47,7 +45,6 @@ def get_redistribute_counts(
     Return counts of unqualified leads per reason (Volume, No Response, Maybe (wants to think)).
     Only leads in pipeline REDISTRIBUTE_LEAD_PIPELINE_ID, stage REDISTRIBUTE_UNQUALIFIED_STAGE_ID.
     If last_days is set, filter by REDISTRIBUTE_DATE_ENTERED_PROPERTY >= (now - last_days).
-    If REDISTRIBUTE_STAGING_NAME_CONTAINS is set, only leads whose name contains that string.
     Returns: { "counts": { "Volume": n, "No Response": n, "Maybe (wants to think)": n }, "error": optional }
     """
     filters = [
@@ -62,17 +59,8 @@ def get_redistribute_counts(
             "operator": "GTE",
             "value": str(since_ms),
         })
-    if REDISTRIBUTE_STAGING_NAME_CONTAINS:
-        staging_value = "*" + REDISTRIBUTE_STAGING_NAME_CONTAINS + "*"
-        filters.append({
-            "propertyName": REDISTRIBUTE_LEAD_NAME_PROPERTY,
-            "operator": "CONTAINS_TOKEN",
-            "value": staging_value,
-        })
     filter_groups = [{"filters": filters}]
     properties = [REDISTRIBUTE_DISQUALIFICATION_PROPERTY]
-    if REDISTRIBUTE_STAGING_NAME_CONTAINS:
-        properties.append(REDISTRIBUTE_LEAD_NAME_PROPERTY)
     counts = {r: 0 for r in REDISTRIBUTE_REASONS}
     try:
         all_results = []
@@ -125,13 +113,6 @@ def execute_redistribute(
             "propertyName": REDISTRIBUTE_DATE_ENTERED_PROPERTY,
             "operator": "GTE",
             "value": str(since_ms),
-        })
-    if REDISTRIBUTE_STAGING_NAME_CONTAINS:
-        staging_value = "*" + REDISTRIBUTE_STAGING_NAME_CONTAINS + "*"
-        filters.append({
-            "propertyName": REDISTRIBUTE_LEAD_NAME_PROPERTY,
-            "operator": "CONTAINS_TOKEN",
-            "value": staging_value,
         })
     filter_groups = [{"filters": filters}]
     properties = ["hs_object_id"]
