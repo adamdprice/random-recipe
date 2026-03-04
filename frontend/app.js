@@ -1290,7 +1290,11 @@
       })
       .catch(function (e) {
         loadingEl.hidden = true;
-        alert('Error: ' + (e.message || 'Failed to load'));
+        var msg = e.message || 'Failed to load';
+        if (msg.indexOf('server returned HTML') !== -1) {
+          msg = 'Server error (check deployment logs or try again).';
+        }
+        alert('Error: ' + msg);
         modal.hidden = true;
       });
   }

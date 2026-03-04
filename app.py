@@ -27,7 +27,7 @@ if os.path.exists(_env_path):
                     if key and val and val not in ('""', "''"):
                         os.environ.setdefault(key, val.strip('"').strip("'"))
 
-from flask import Flask, request, jsonify, send_from_directory, redirect
+from flask import Flask, request, jsonify, send_from_directory, redirect, make_response
 from flask_cors import CORS
 
 from config import (
@@ -80,15 +80,7 @@ def _api_500_ensure_json(response):
         and "application/json" not in (response.content_type or "")
     ):
         try:
-            response.set_data(
-                json.dumps(
-                    {
-                        "error": "An unexpected error occurred. Please try again. Check Railway logs for details.",
-                        "updated": 0,
-                        "errors": [],
-                    }
-                )
-            )
+            response.set_data(_API_500_JSON_BODY)
             response.content_type = "application/json"
         except Exception:
             pass
@@ -1373,6 +1365,9 @@ def distribute():
 
 
 # --- Re-assign leads (redistribute another person's leads to available team members) ---
+REASSIGN_PREVIEW_TIMEOUT_SECONDS = 55  # Return JSON before typical proxy timeout (60s) so frontend never sees HTML 502
+
+
 @app.route("/api/reassign/preview", methods=["GET"])
 def reassign_preview():
     """GET ?owner_id=...&team=... (team = full name e.g. Inbound Lead Team). Returns counts and target_staff."""
@@ -1386,8 +1381,27 @@ def reassign_preview():
         if team not in STAFF_LEAD_TEAMS:
             return jsonify({"error": "invalid team"}), 400
         client = get_client()
-        out = get_reassign_preview(client, owner_id, team)
-        return jsonify(out)
+        result_holder: list = []
+        exc_holder: list = []
+
+        def fetch():
+            try:
+                result_holder.append(get_reassign_preview(client, owner_id, team))
+            except Exception as e:
+                exc_holder.append(e)
+
+        thread = threading.Thread(target=fetch, daemon=True)
+        thread.start()
+        thread.join(timeout=REASSIGN_PREVIEW_TIMEOUT_SECONDS)
+        if exc_holder:
+            raise exc_holder[0]
+        if not result_holder:
+            return jsonify({
+                "error": "Re-assign preview is taking too long. Try again in a moment.",
+                "counts": {},
+                "target_staff": [],
+            }), 503
+        return jsonify(result_holder[0])
     except Exception as e:
         _log.exception("reassign preview failed")
         return jsonify({"error": str(e)}), 500
@@ -1542,6 +1556,13 @@ def api_redistribute_execute():
 
 
 # Ensure API errors never return HTML (so frontend never sees "Unexpected token '<'" from our app)
+_API_500_JSON_BODY = json.dumps({
+    "error": "An unexpected error occurred. Please try again. Check Railway logs for details.",
+    "updated": 0,
+    "errors": [],
+})
+
+
 @app.errorhandler(500)
 def api_500_json(e):
     path = ""
@@ -1551,11 +1572,9 @@ def api_500_json(e):
     except Exception:
         pass
     if path.startswith("/api/"):
-        return jsonify({
-            "error": "An unexpected error occurred. Please try again. Check Railway logs for details.",
-            "updated": 0,
-            "errors": [],
-        }), 500
+        r = make_response(_API_500_JSON_BODY, 500)
+        r.content_type = "application/json"
+        return r
     raise e  # non-API: let Flask's default 500 response run
 
 
