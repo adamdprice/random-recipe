@@ -123,14 +123,24 @@ from holidays import set_storage as _holidays_set_storage
 
 _init_hubspot_cache_db()
 init_holidays_db()
-from redistribute_cache_db import (
-    init_redistribute_cache_db,
-    refresh_redistribute_cache,
-    get_counts_from_cache as _redistribute_get_counts_from_cache,
-    get_lead_rows_from_cache as _redistribute_get_lead_rows_from_cache,
-    cache_has_data as _redistribute_cache_has_data,
-)
-init_redistribute_cache_db()
+_redistribute_cache_available = False
+_redistribute_get_counts_from_cache = None
+_redistribute_get_lead_rows_from_cache = None
+_redistribute_cache_has_data = lambda: False
+_refresh_redistribute_cache_fn = None
+try:
+    from redistribute_cache_db import (
+        init_redistribute_cache_db,
+        refresh_redistribute_cache as _refresh_redistribute_cache_fn,
+        get_counts_from_cache as _redistribute_get_counts_from_cache,
+        get_lead_rows_from_cache as _redistribute_get_lead_rows_from_cache,
+        cache_has_data as _redistribute_cache_has_data,
+    )
+    init_redistribute_cache_db()
+    _redistribute_cache_available = True
+except Exception as _e:  # noqa: F841
+    import logging
+    logging.getLogger(__name__).warning("Redistribute cache disabled: %s", _e)
 
 
 def _hubspot_holidays_load() -> dict:
@@ -1503,25 +1513,30 @@ def reassign_assign_one():
 @app.route("/api/redistribute/counts", methods=["GET"])
 def api_redistribute_counts():
     """GET ?last_days= (optional), ?lead_type= (optional). Returns { counts: { reason: n, ... }, error?: string }. Uses DB cache when available (refreshed every 2h)."""
-    from config import REDISTRIBUTE_LEAD_TYPES
-    last_days = request.args.get("last_days")
-    if last_days is not None and last_days != "":
-        try:
-            last_days = int(last_days)
-            if last_days <= 0:
-                last_days = None
-        except (TypeError, ValueError):
-            last_days = None
-    else:
-        last_days = None
-    lead_type = (request.args.get("lead_type") or "").strip() or None
-    if lead_type is not None and lead_type not in REDISTRIBUTE_LEAD_TYPES:
-        lead_type = None
     try:
-        if lead_type and os.getenv("DATABASE_URL") and _redistribute_cache_has_data():
-            out = _redistribute_get_counts_from_cache(lead_type, last_days)
-            if out is not None:
-                return jsonify(out)
+        from config import REDISTRIBUTE_LEAD_TYPES
+        last_days = request.args.get("last_days")
+        if last_days is not None and last_days != "":
+            try:
+                last_days = int(last_days)
+                if last_days <= 0:
+                    last_days = None
+            except (TypeError, ValueError):
+                last_days = None
+        else:
+            last_days = None
+        lead_type = (request.args.get("lead_type") or "").strip() or None
+        if lead_type is not None and lead_type not in REDISTRIBUTE_LEAD_TYPES:
+            lead_type = None
+        # Try cache first (never let cache path raise – fall back to HubSpot on any failure)
+        if lead_type and _redistribute_cache_available and _redistribute_get_counts_from_cache:
+            try:
+                if _redistribute_cache_has_data():
+                    out = _redistribute_get_counts_from_cache(lead_type, last_days)
+                    if out is not None:
+                        return jsonify(out)
+            except Exception as cache_err:
+                _log.debug("Redistribute cache fallback: %s", cache_err)
         from redistribute import get_redistribute_counts
         client = get_client()
         out = get_redistribute_counts(client, last_days=last_days, lead_type=lead_type)
@@ -1554,17 +1569,21 @@ def api_redistribute_execute():
         return jsonify({"error": "reason required and must be one of: " + ", ".join(REDISTRIBUTE_REASONS)}), 400
     try:
         client = get_client()
-        if lead_type and os.getenv("DATABASE_URL") and _redistribute_cache_has_data():
-            rows = _redistribute_get_lead_rows_from_cache(lead_type, reason, last_days)
-            if rows is not None:
-                from redistribute import execute_redistribute_batch
-                result = execute_redistribute_batch(client, rows)
-                _log_activity(
-                    "redistribute",
-                    f"Re-distributed {result['redistributed']} lead(s) (reason: {reason}, from cache)",
-                    {"reason": reason, "redistributed": result["redistributed"], "errors": result.get("errors", [])[:20]},
-                )
-                return jsonify({"redistributed": result["redistributed"], "errors": result.get("errors", [])})
+        if lead_type and _redistribute_cache_available and _redistribute_get_lead_rows_from_cache:
+            try:
+                if _redistribute_cache_has_data():
+                    rows = _redistribute_get_lead_rows_from_cache(lead_type, reason, last_days)
+                    if rows is not None:
+                        from redistribute import execute_redistribute_batch
+                        result = execute_redistribute_batch(client, rows)
+                        _log_activity(
+                            "redistribute",
+                            f"Re-distributed {result['redistributed']} lead(s) (reason: {reason}, from cache)",
+                            {"reason": reason, "redistributed": result["redistributed"], "errors": result.get("errors", [])[:20]},
+                        )
+                        return jsonify({"redistributed": result["redistributed"], "errors": result.get("errors", [])})
+            except Exception as cache_err:
+                _log.debug("Redistribute execute cache fallback: %s", cache_err)
         from redistribute import execute_redistribute
         result = execute_redistribute(client, reason, last_days=last_days, lead_type=lead_type)
         if result.get("error"):
@@ -1670,9 +1689,9 @@ def _redistribute_cache_loop() -> None:
     time.sleep(120)  # First run 2 min after startup
     while True:
         try:
-            if HUBSPOT_ACCESS_TOKEN:
+            if _redistribute_cache_available and _refresh_redistribute_cache_fn and HUBSPOT_ACCESS_TOKEN:
                 client = get_client()
-                refresh_redistribute_cache(client)
+                _refresh_redistribute_cache_fn(client)
         except Exception as e:
             _log.exception("Redistribute cache refresh error: %s", e)
         time.sleep(REDISTRIBUTE_CACHE_REFRESH_INTERVAL_SECONDS)
@@ -1681,7 +1700,7 @@ def _redistribute_cache_loop() -> None:
 if os.getenv("DATABASE_URL"):
     _redistribute_cache_thread = threading.Thread(target=_redistribute_cache_loop, daemon=True, name="redistribute-cache")
     _redistribute_cache_thread.start()
-    _log.info("Redistribute cache refresh started (every 2 hours)")
+    _log.info("Redistribute cache refresh started (every 2 hours)" if _redistribute_cache_available else "Redistribute cache disabled (table/DB unavailable)")
 
 if __name__ == "__main__":
     import os
