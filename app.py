@@ -1018,8 +1018,8 @@ def activity_log():
     return jsonify({"entries": entries})
 
 
-# Max time to wait for /api/staff when fetching from HubSpot (cache miss). Keep below typical gateway timeout (~60s) so we return 503 JSON.
-STAFF_FETCH_TIMEOUT_SECONDS = 50
+# Max time to wait for /api/staff when fetching from HubSpot (cache miss). Keep below gunicorn --timeout 90 so worker is not killed.
+STAFF_FETCH_TIMEOUT_SECONDS = 40
 
 
 @app.route("/api/staff", methods=["GET"])
@@ -1447,11 +1447,16 @@ def reassign_preview():
         client = get_client()
         out = get_reassign_preview(client, owner_id, team)
         if out.get("error"):
-            return _safe_json_response({"error": out["error"]}, 500)
+            err = out["error"]
+            if "429" in err or "Too Many Requests" in err:
+                err = "HubSpot rate limit reached. Please wait a minute and try again."
+            return _safe_json_response({"error": err}, 500)
         return _safe_json_response(out)
     except Exception as e:
         _log.exception("reassign preview failed")
         err_msg = str(e) if e else "Unknown error"
+        if "429" in err_msg or "Too Many Requests" in err_msg:
+            err_msg = "HubSpot rate limit reached. Please wait a minute and try again."
         return _safe_json_response({"error": err_msg}, 500)
 
 

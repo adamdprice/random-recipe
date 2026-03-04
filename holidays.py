@@ -172,6 +172,21 @@ def is_staff_on_holiday_today(staff_id: str) -> bool:
     return False
 
 
+def get_staff_ids_on_holiday_today() -> set[str]:
+    """Return set of staff_id (str) that are on holiday today. Single _load() call for use in bulk (e.g. reassign)."""
+    data = _load()
+    today = _today()
+    out: set[str] = set()
+    for h in data.get("holidays") or []:
+        start = _parse_d(h.get("start_date"))
+        end = _parse_d(h.get("end_date"))
+        if start and end and _date_in_range(today, start, end):
+            sid = h.get("staff_id")
+            if sid is not None:
+                out.add(str(sid))
+    return out
+
+
 def get_saved_availability() -> dict[str, str]:
     return (_load().get("saved_availability") or {}).copy()
 

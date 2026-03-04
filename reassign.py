@@ -180,12 +180,16 @@ def get_reassign_preview(
     """
     counts = {CATEGORY_ATTEMPT_1: 0, CATEGORY_ATTEMPT_2: 0, CATEGORY_ATTEMPT_3: 0, CATEGORY_CALL_BACK: 0}
     try:
+        from holidays import get_staff_ids_on_holiday_today
+        staff_on_holiday = get_staff_ids_on_holiday_today()
         leads = _fetch_leads_for_owner_team(client, owner_id, team_name)
         for lead in leads:
             for cat in _categorize_lead(lead):
                 if cat in counts:
                     counts[cat] += 1
-        target_staff = _get_target_staff(client, team_name, exclude_owner_id=owner_id)
+        target_staff = _get_target_staff(
+            client, team_name, exclude_owner_id=owner_id, staff_ids_on_holiday_today=staff_on_holiday
+        )
         return {"counts": counts, "target_staff": target_staff}
     except Exception as e:
         _log.exception("get_reassign_preview failed")
@@ -214,8 +218,10 @@ def _get_target_staff(
     client: HubSpotClient,
     team_name: str,
     exclude_owner_id: str,
+    staff_ids_on_holiday_today: Optional[set[str]] = None,
 ) -> list[dict]:
-    """Staff in team_name with availability Available, excluding exclude_owner_id. Includes total_open_leads; sorted by most leads first."""
+    """Staff in team_name with availability Available, excluding exclude_owner_id. Includes total_open_leads; sorted by least leads first.
+    When staff_ids_on_holiday_today is provided, use it instead of calling is_staff_on_holiday_today per row (avoids N _load() calls)."""
     result = client.search_custom_objects(
         HUBSPOT_STAFF_OBJECT_ID,
         filter_groups=[{"filters": [{"propertyName": "hubspot_owner_id", "operator": "HAS_PROPERTY"}]}],
@@ -226,7 +232,8 @@ def _get_target_staff(
         limit=200,
     )
     rows = result.get("results", []) or []
-    from holidays import is_staff_on_holiday_today
+    if staff_ids_on_holiday_today is None:
+        from holidays import is_staff_on_holiday_today
     out = []
     for r in rows:
         props = r.get("properties") or {}
@@ -239,8 +246,13 @@ def _get_target_staff(
         if availability == "Unavailable":
             continue
         staff_id = r.get("id")
-        if staff_id and is_staff_on_holiday_today(str(staff_id)):
-            continue
+        if staff_id:
+            sid_str = str(staff_id)
+            if staff_ids_on_holiday_today is not None:
+                if sid_str in staff_ids_on_holiday_today:
+                    continue
+            elif is_staff_on_holiday_today(sid_str):
+                continue
         name = _str(_prop_value(props, "name")) or owner_id
         total_open = (
             _num(_prop_value(props, "open_inbound_leads_n8n"))
@@ -296,7 +308,11 @@ def execute_reassign(
     if not contact_ids:
         return {"reassigned": 0, "assignments": [], "error": "No associated contacts found for selected leads"}
 
-    target_staff = _get_target_staff(client, team_name, exclude_owner_id=owner_id)
+    from holidays import get_staff_ids_on_holiday_today
+    staff_on_holiday = get_staff_ids_on_holiday_today()
+    target_staff = _get_target_staff(
+        client, team_name, exclude_owner_id=owner_id, staff_ids_on_holiday_today=staff_on_holiday
+    )
     if target_owner_ids is not None:
         allowed = set(target_owner_ids)
         target_staff = [s for s in target_staff if s.get("hubspot_owner_id") in allowed]
@@ -347,8 +363,15 @@ def list_callbacks(
             "call_back_date": cb_date.isoformat() if cb_date else None,
             "call_back_time": cb_time,
         })
+    from holidays import get_staff_ids_on_holiday_today
+    staff_on_holiday = get_staff_ids_on_holiday_today()
     if not call_back_leads:
-        return {"callbacks": [], "target_staff": _get_target_staff(client, team_name, exclude_owner_id=owner_id)}
+        return {
+            "callbacks": [],
+            "target_staff": _get_target_staff(
+                client, team_name, exclude_owner_id=owner_id, staff_ids_on_holiday_today=staff_on_holiday
+            ),
+        }
 
     lead_ids = [str(item["lead_id"]) for item in call_back_leads if item.get("lead_id")]
     assoc = client.get_lead_to_contact_associations_batch(lead_ids) if lead_ids else {}
@@ -383,7 +406,9 @@ def list_callbacks(
     out_list.sort(key=_sort_key)
     return {
         "callbacks": out_list,
-        "target_staff": _get_target_staff(client, team_name, exclude_owner_id=owner_id),
+        "target_staff": _get_target_staff(
+            client, team_name, exclude_owner_id=owner_id, staff_ids_on_holiday_today=staff_on_holiday
+        ),
     }
 
 
@@ -400,7 +425,11 @@ def assign_single_contact(
     if not contact_id or not new_owner_id:
         return {"success": False, "error": "contact_id and new_owner_id required"}
     if team_name:
-        allowed = _get_target_staff(client, team_name, exclude_owner_id="")
+        from holidays import get_staff_ids_on_holiday_today
+        staff_on_holiday = get_staff_ids_on_holiday_today()
+        allowed = _get_target_staff(
+            client, team_name, exclude_owner_id="", staff_ids_on_holiday_today=staff_on_holiday
+        )
         allowed_ids = {s.get("hubspot_owner_id") for s in allowed}
         if new_owner_id not in allowed_ids:
             return {"success": False, "error": "Selected staff member is not in this team"}

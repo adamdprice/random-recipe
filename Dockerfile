@@ -14,4 +14,4 @@ RUN mkdir -p data frontend/images
 # Railway sets PORT
 ENV PORT=3000
 EXPOSE 3000
-CMD ["sh", "-c", "gunicorn -w 1 -b 0.0.0.0:${PORT} app:app"]
+CMD ["sh", "-c", "gunicorn -w 1 -b 0.0.0.0:${PORT} --timeout 90 app:app"]
