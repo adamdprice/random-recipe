@@ -62,6 +62,32 @@ _frontend_dir = os.path.join(_app_dir, "frontend")
 app = Flask(__name__, static_folder=_frontend_dir, static_url_path="")
 CORS(app)
 
+
+@app.after_request
+def _api_500_ensure_json(response):
+    """If an API route returned 500 with HTML (e.g. handler was skipped), replace with JSON so frontend never sees HTML."""
+    if (
+        response.status_code == 500
+        and request.path.startswith("/api/")
+        and response.content_type
+        and "application/json" not in response.content_type
+    ):
+        try:
+            response.set_data(
+                json.dumps(
+                    {
+                        "error": "An unexpected error occurred. Please try again.",
+                        "updated": 0,
+                        "errors": [],
+                    }
+                )
+            )
+            response.content_type = "application/json"
+        except Exception:
+            pass
+    return response
+
+
 # Auth: when SESSION_SECRET is set and at least one method (password or email OTP) is configured
 SESSION_COOKIE_NAME = "kinly_session"
 SESSION_MAX_AGE_SECONDS = 24 * 3600  # 24 hours
@@ -1479,12 +1505,15 @@ def api_redistribute_execute():
 # Ensure API errors never return HTML (so frontend never sees "Unexpected token '<'" from our app)
 @app.errorhandler(500)
 def api_500_json(e):
-    if request.path.startswith("/api/"):
-        return jsonify({
-            "error": "An unexpected error occurred. Please try again.",
-            "updated": 0,
-            "errors": [],
-        }), 500
+    try:
+        if request.path.startswith("/api/"):
+            return jsonify({
+                "error": "An unexpected error occurred. Please try again.",
+                "updated": 0,
+                "errors": [],
+            }), 500
+    except Exception:
+        pass  # fall through so after_request can fix HTML body if needed
     raise e  # non-API: let Flask's default 500 response run
 
 
