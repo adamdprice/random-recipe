@@ -217,6 +217,14 @@
     if (!cardsContainer) return;
     if (loadingEl) loadingEl.hidden = false;
     if (errorEl) { errorEl.hidden = true; errorEl.textContent = ''; }
+    // Preserve current "Filter by last X days" values before rebuilding cards
+    var preservedDays = {};
+    var existingCards = cardsContainer.querySelectorAll('.redistribute-card');
+    existingCards.forEach(function (card) {
+      var lt = card.getAttribute('data-lead-type');
+      var input = card.querySelector('.redistribute-last-days-input');
+      if (lt && input && (input.value || '').trim() !== '') preservedDays[lt] = input.value.trim();
+    });
     cardsContainer.innerHTML = '';
     REDISTRIBUTE_LEAD_TYPES.forEach(function (leadType) {
       var card = document.createElement('div');
@@ -237,6 +245,8 @@
         '    <tbody class="redistribute-tbody"></tbody>' +
         '  </table>' +
         '</div>';
+      var input = card.querySelector('.redistribute-last-days-input');
+      if (input && preservedDays[leadType]) input.value = preservedDays[leadType];
       cardsContainer.appendChild(card);
     });
     var cards = cardsContainer.querySelectorAll('.redistribute-card');
