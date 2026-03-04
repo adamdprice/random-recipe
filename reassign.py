@@ -176,17 +176,20 @@ def get_reassign_preview(
     """
     Returns counts per category (attempt_1, attempt_2, attempt_3, call_back) and
     target_staff (same team, available, excluding owner_id).
+    On failure returns {"error": str, "counts": {...}, "target_staff": []} so the app can always return JSON.
     """
     counts = {CATEGORY_ATTEMPT_1: 0, CATEGORY_ATTEMPT_2: 0, CATEGORY_ATTEMPT_3: 0, CATEGORY_CALL_BACK: 0}
-    leads = _fetch_leads_for_owner_team(client, owner_id, team_name)
-    for lead in leads:
-        for cat in _categorize_lead(lead):
-            if cat in counts:
-                counts[cat] += 1
-
-    # Target staff: same team, availability = Available, exclude owner_id
-    target_staff = _get_target_staff(client, team_name, exclude_owner_id=owner_id)
-    return {"counts": counts, "target_staff": target_staff}
+    try:
+        leads = _fetch_leads_for_owner_team(client, owner_id, team_name)
+        for lead in leads:
+            for cat in _categorize_lead(lead):
+                if cat in counts:
+                    counts[cat] += 1
+        target_staff = _get_target_staff(client, team_name, exclude_owner_id=owner_id)
+        return {"counts": counts, "target_staff": target_staff}
+    except Exception as e:
+        _log.exception("get_reassign_preview failed")
+        return {"error": str(e), "counts": counts, "target_staff": []}
 
 
 def _staff_in_team(lead_teams_raw: Any, team_name: str) -> bool:

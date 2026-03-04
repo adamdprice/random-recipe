@@ -1399,6 +1399,22 @@ def _normalize_team(team: str):
     return None
 
 
+def _safe_json_response(data: dict, status: int = 200):
+    """Return a JSON response that never raises (uses json.dumps with default=str)."""
+    try:
+        body = json.dumps(data, default=str)
+        r = make_response(body, status)
+        r.content_type = "application/json"
+        return r
+    except Exception:
+        r = make_response(
+            json.dumps({"error": "An unexpected error occurred. Please try again. Check deployment logs for details."}),
+            500,
+        )
+        r.content_type = "application/json"
+        return r
+
+
 @app.route("/api/reassign/preview", methods=["GET"])
 def reassign_preview():
     """GET ?owner_id=...&team=... (team = full name e.g. Inbound Lead Team). Returns counts and target_staff."""
@@ -1406,18 +1422,20 @@ def reassign_preview():
         owner_id = (request.args.get("owner_id") or "").strip()
         team_raw = (request.args.get("team") or "").strip()
         if not owner_id or not team_raw:
-            return jsonify({"error": "owner_id and team required"}), 400
+            return _safe_json_response({"error": "owner_id and team required"}, 400)
         team = _normalize_team(team_raw)
         if not team:
-            return jsonify({"error": "invalid team"}), 400
+            return _safe_json_response({"error": "invalid team"}, 400)
         from reassign import get_reassign_preview
         client = get_client()
         out = get_reassign_preview(client, owner_id, team)
-        return jsonify(out)
+        if out.get("error"):
+            return _safe_json_response({"error": out["error"]}, 500)
+        return _safe_json_response(out)
     except Exception as e:
         _log.exception("reassign preview failed")
         err_msg = str(e) if e else "Unknown error"
-        return jsonify({"error": err_msg}), 500
+        return _safe_json_response({"error": err_msg}, 500)
 
 
 @app.route("/api/reassign/execute", methods=["POST"])
