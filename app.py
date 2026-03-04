@@ -63,27 +63,40 @@ _frontend_dir = os.path.join(_app_dir, "frontend")
 app = Flask(__name__, static_folder=_frontend_dir, static_url_path="")
 CORS(app)
 
+# Fallback body for any API 500 so frontend never sees HTML (defined early for after_request)
+_API_500_JSON_BODY = json.dumps({
+    "error": "An unexpected error occurred. Please try again. Check Railway logs for details.",
+    "staff": [],
+    "holidays": [],
+    "owners": [],
+    "lead_teams": [],
+})
+
 
 @app.after_request
 def _api_500_ensure_json(response):
-    """If an API route returned 500 with HTML (e.g. handler was skipped), replace with JSON so frontend never sees HTML."""
+    """For any API 500, force JSON body so frontend never sees HTML (e.g. from Flask or proxy)."""
     path = ""
     try:
         if request:
             path = getattr(request, "path", "") or ""
     except Exception:
         pass
-    if (
-        response.status_code == 500
-        and path.startswith("/api/")
-        and response.content_type
-        and "application/json" not in (response.content_type or "")
-    ):
+    if response.status_code == 500 and path.startswith("/api/"):
+        # Replace with JSON if currently HTML or missing JSON content-type
+        ct = (response.content_type or "").lower()
+        is_json = "application/json" in ct
         try:
-            response.set_data(_API_500_JSON_BODY)
-            response.content_type = "application/json"
+            data = response.get_data(as_text=True) if getattr(response, "get_data", None) else ""
+            looks_html = data.strip().startswith("<") if isinstance(data, str) else False
         except Exception:
-            pass
+            looks_html = True
+        if not is_json or looks_html:
+            try:
+                response.set_data(_API_500_JSON_BODY)
+                response.content_type = "application/json"
+            except Exception:
+                pass
     return response
 
 
@@ -1005,8 +1018,8 @@ def activity_log():
     return jsonify({"entries": entries})
 
 
-# Max time to wait for /api/staff when fetching from HubSpot (cache miss). Keeps response before frontend 90s timeout.
-STAFF_FETCH_TIMEOUT_SECONDS = 75
+# Max time to wait for /api/staff when fetching from HubSpot (cache miss). Keep below typical gateway timeout (~60s) so we return 503 JSON.
+STAFF_FETCH_TIMEOUT_SECONDS = 50
 
 
 @app.route("/api/staff", methods=["GET"])
@@ -1621,14 +1634,7 @@ def api_redistribute_execute():
         return jsonify({"redistributed": 0, "errors": [], "error": str(e)}), 500
 
 
-# Ensure API errors never return HTML (so frontend never sees "Unexpected token '<'" from our app)
-_API_500_JSON_BODY = json.dumps({
-    "error": "An unexpected error occurred. Please try again. Check Railway logs for details.",
-    "updated": 0,
-    "errors": [],
-})
-
-
+# 500 error handler returns same JSON fallback (body defined at top)
 @app.errorhandler(500)
 def api_500_json(e):
     path = ""
