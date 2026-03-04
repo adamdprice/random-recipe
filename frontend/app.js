@@ -188,7 +188,11 @@
     if (rowsEl) rowsEl.hidden = true;
     var lastDays = getRedistributeLastDays();
     var qs = lastDays != null ? '?last_days=' + encodeURIComponent(lastDays) : '';
-    fetch(API + '/redistribute/counts' + qs).then(parseJsonResponse).then(function (data) {
+    var controller = new AbortController();
+    var timeoutId = setTimeout(function () { controller.abort(); }, 25000);
+    fetch(API + '/redistribute/counts' + qs, { signal: controller.signal })
+      .then(function (r) { clearTimeout(timeoutId); return r; })
+      .then(parseJsonResponse).then(function (data) {
       if (loadingEl) loadingEl.hidden = true;
       if (data.error) {
         if (errorEl) { errorEl.textContent = data.error; errorEl.hidden = false; }
@@ -230,8 +234,11 @@
       });
       if (rowsEl) rowsEl.hidden = false;
     }).catch(function (err) {
+      clearTimeout(timeoutId);
       if (loadingEl) loadingEl.hidden = true;
-      if (errorEl) { errorEl.textContent = (err && err.message) ? err.message : 'Failed to load'; errorEl.hidden = false; }
+      var msg = (err && err.message) ? err.message : 'Failed to load';
+      if (err && err.name === 'AbortError') msg = 'Request timed out. Check your pipeline/stage config and try again.';
+      if (errorEl) { errorEl.textContent = msg; errorEl.hidden = false; }
     });
   }
 

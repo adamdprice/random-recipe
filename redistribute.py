@@ -73,10 +73,14 @@ def get_redistribute_counts(
     if REDISTRIBUTE_STAGING_NAME_CONTAINS:
         properties.append(REDISTRIBUTE_LEAD_NAME_PROPERTY)
     counts = {r: 0 for r in REDISTRIBUTE_REASONS}
+    # Skip HubSpot call if pipeline/stage are still placeholders (avoids slow or invalid API calls)
+    if REDISTRIBUTE_LEAD_PIPELINE_ID in ("lead-pipeline-id", "") or REDISTRIBUTE_UNQUALIFIED_STAGE_ID in ("unqualified-stage-id", ""):
+        return {"counts": counts, "error": "Configure REDISTRIBUTE_LEAD_PIPELINE_ID and REDISTRIBUTE_UNQUALIFIED_STAGE_ID in environment."}
     try:
         all_results = []
         after = None
-        while True:
+        max_pages = 20  # cap at 2000 leads to avoid infinite pagination
+        for _ in range(max_pages):
             res = client.search_leads(
                 filter_groups=filter_groups,
                 properties=properties,
