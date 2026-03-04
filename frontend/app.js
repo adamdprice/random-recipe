@@ -8,10 +8,12 @@
       var ct = (res.headers.get('content-type') || '').toLowerCase();
       if (ct.indexOf('application/json') !== -1) return JSON.parse(text);
       if (text.trimStart().indexOf('<') === 0) {
+        var status = res.status;
         var onLocalhost = /^localhost$|^127\.0\.0\.1$/.test(window.location.hostname);
-        throw new Error(onLocalhost
+        var msg = onLocalhost
           ? 'Server returned HTML instead of JSON. Open the app from the Flask server (e.g. http://localhost:5002 or http://localhost:5001) in your browser, not from a static file or another dev server.'
-          : 'Something went wrong loading data. Try refreshing the page or signing in again.');
+          : 'Something went wrong loading data (server returned HTML, status ' + status + '). Try refreshing the page or signing in again. If status is 200, the API URL may be wrong (e.g. frontend and API on different hosts).';
+        throw new Error(msg);
       }
       return JSON.parse(text);
     });
