@@ -156,7 +156,11 @@ def _fetch_leads_for_owner_team(
             limit=100,
             after=after,
         )
-        results = res.get("results", [])
+        if not isinstance(res, dict):
+            break
+        results = res.get("results")
+        if not isinstance(results, list):
+            results = []
         all_results.extend(results)
         after = (res.get("paging") or {}).get("next", {}).get("after")
         if not after or len(results) < 100:

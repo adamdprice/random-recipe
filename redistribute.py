@@ -40,18 +40,23 @@ def _str(v: Any) -> str:
 def get_redistribute_counts(
     client: HubSpotClient,
     last_days: Optional[int] = None,
+    lead_type: Optional[str] = None,
 ) -> dict:
     """
     Return counts of unqualified leads per reason (Volume, No Response, Maybe (wants to think)).
     Only leads in pipeline REDISTRIBUTE_LEAD_PIPELINE_ID, stage REDISTRIBUTE_UNQUALIFIED_STAGE_ID.
     If last_days is set, filter by REDISTRIBUTE_DATE_ENTERED_PROPERTY >= (now - last_days).
-    Returns: { "counts": { "Volume": n, "No Response": n, "Maybe (wants to think)": n }, "error": optional }
+    If lead_type is set (e.g. Inbound Lead, PIP Lead), filter by hs_lead_type.
+    Returns: { "counts": { "Volume": n, ... }, "error": optional }
     """
+    from config import REDISTRIBUTE_LEAD_TYPES
     filters = [
         {"propertyName": "hs_pipeline", "operator": "EQ", "value": REDISTRIBUTE_LEAD_PIPELINE_ID},
         {"propertyName": "hs_pipeline_stage", "operator": "EQ", "value": REDISTRIBUTE_UNQUALIFIED_STAGE_ID},
         {"propertyName": REDISTRIBUTE_DISQUALIFICATION_PROPERTY, "operator": "IN", "values": REDISTRIBUTE_REASONS},
     ]
+    if lead_type and lead_type in REDISTRIBUTE_LEAD_TYPES:
+        filters.append({"propertyName": "hs_lead_type", "operator": "EQ", "value": lead_type})
     if last_days is not None and last_days > 0:
         since_ms = int((datetime.now(timezone.utc) - timedelta(days=last_days)).timestamp() * 1000)
         filters.append({
@@ -60,7 +65,7 @@ def get_redistribute_counts(
             "value": str(since_ms),
         })
     filter_groups = [{"filters": filters}]
-    properties = [REDISTRIBUTE_DISQUALIFICATION_PROPERTY]
+    properties = [REDISTRIBUTE_DISQUALIFICATION_PROPERTY, "hs_lead_type"]
     counts = {r: 0 for r in REDISTRIBUTE_REASONS}
     try:
         all_results = []
@@ -93,13 +98,16 @@ def execute_redistribute(
     client: HubSpotClient,
     reason: str,
     last_days: Optional[int] = None,
+    lead_type: Optional[str] = None,
 ) -> dict:
     """
     For all unqualified leads with the given reason (same filters as counts), re-distribute:
     - Contact: clear hubspot_owner_id, set hs_lead_status = Open Lead, clear assign_lead
     - Lead: move to REDISTRIBUTE_NEW_STAGE_ID, clear hs_lead_disqualification_reason
+    If lead_type is set, only leads with that hs_lead_type are included.
     Returns: { "redistributed": n, "errors": [...], "error": optional }
     """
+    from config import REDISTRIBUTE_LEAD_TYPES
     if reason not in REDISTRIBUTE_REASONS:
         return {"redistributed": 0, "errors": [], "error": f"Invalid reason: {reason}"}
     filters = [
@@ -107,6 +115,8 @@ def execute_redistribute(
         {"propertyName": "hs_pipeline_stage", "operator": "EQ", "value": REDISTRIBUTE_UNQUALIFIED_STAGE_ID},
         {"propertyName": REDISTRIBUTE_DISQUALIFICATION_PROPERTY, "operator": "EQ", "value": reason},
     ]
+    if lead_type and lead_type in REDISTRIBUTE_LEAD_TYPES:
+        filters.append({"propertyName": "hs_lead_type", "operator": "EQ", "value": lead_type})
     if last_days is not None and last_days > 0:
         since_ms = int((datetime.now(timezone.utc) - timedelta(days=last_days)).timestamp() * 1000)
         filters.append({
@@ -145,6 +155,40 @@ def execute_redistribute(
     for lead_id in all_lead_ids:
         contact_ids = assoc.get(lead_id) or []
         contact_id = contact_ids[0] if contact_ids else None
+        try:
+            if contact_id:
+                client.patch_contact(contact_id, {
+                    "hubspot_owner_id": "",
+                    "hs_lead_status": REDISTRIBUTE_OPEN_LEAD_STATUS,
+                    "assign_lead": "",
+                })
+            client.patch_lead(lead_id, {
+                "hs_pipeline": REDISTRIBUTE_LEAD_PIPELINE_ID,
+                "hs_pipeline_stage": REDISTRIBUTE_NEW_STAGE_ID,
+                REDISTRIBUTE_DISQUALIFICATION_PROPERTY: "",
+            })
+            redistributed += 1
+        except Exception as e:
+            errors.append({"lead_id": lead_id, "message": str(e)})
+    return {"redistributed": redistributed, "errors": errors}
+
+
+def execute_redistribute_batch(
+    client: HubSpotClient,
+    lead_rows: list[dict],
+) -> dict:
+    """
+    Re-distribute a pre-resolved list of leads (e.g. from DB cache).
+    Each item: { "lead_id": str, "contact_id": str | None }.
+    Same contact/lead patches as execute_redistribute. Returns { "redistributed": n, "errors": [...] }.
+    """
+    errors = []
+    redistributed = 0
+    for row in lead_rows:
+        lead_id = (row.get("lead_id") or "").strip()
+        contact_id = (row.get("contact_id") or "").strip() or None
+        if not lead_id:
+            continue
         try:
             if contact_id:
                 client.patch_contact(contact_id, {

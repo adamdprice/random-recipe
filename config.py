@@ -86,7 +86,13 @@ REDISTRIBUTE_NEW_STAGE_ID = _def or "new-stage-id"
 REDISTRIBUTE_DISQUALIFICATION_PROPERTY = os.getenv("REDISTRIBUTE_DISQUALIFICATION_PROPERTY", "hs_lead_disqualification_reason").strip()
 REDISTRIBUTE_DATE_ENTERED_PROPERTY = os.getenv("REDISTRIBUTE_DATE_ENTERED_PROPERTY", "hs_v2_date_entered_unqualified_stage_id_1675714327").strip()
 REDISTRIBUTE_REASONS = ["Volume", "No Response", "Maybe (wants to think)"]
+# Re-Distribute: filter by hs_lead_type (Inbound Lead, PIP Lead, Frosties lead, Panther Lead)
+REDISTRIBUTE_LEAD_TYPES = ["Inbound Lead", "PIP Lead", "Frosties lead", "Panther Lead"]
 REDISTRIBUTE_OPEN_LEAD_STATUS = os.getenv("REDISTRIBUTE_OPEN_LEAD_STATUS", "Open Lead").strip()
+# Re-Distribute: cache in DB to avoid HubSpot rate limits; refresh interval (seconds). Default 2 hours.
+REDISTRIBUTE_CACHE_REFRESH_INTERVAL_SECONDS = int(
+    os.getenv("REDISTRIBUTE_CACHE_REFRESH_INTERVAL_SECONDS", str(2 * 3600)).strip() or str(2 * 3600)
+)
 # Staging only: if set, only show leads whose name contains this string (e.g. "TestABC")
 REDISTRIBUTE_STAGING_NAME_CONTAINS = os.getenv("REDISTRIBUTE_STAGING_NAME_CONTAINS", "").strip()
 REDISTRIBUTE_LEAD_NAME_PROPERTY = os.getenv("REDISTRIBUTE_LEAD_NAME_PROPERTY", "hs_lead_name").strip()

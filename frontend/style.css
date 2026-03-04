@@ -714,11 +714,39 @@ code {
 }
 
 .redistribute-last-days-input {
-  width: 5rem;
+  min-width: 4rem;
+  width: 5.5rem;
   padding: 0.4rem 0.6rem;
   border: 1px solid var(--border);
   border-radius: 6px;
   font-size: 1rem;
+  box-sizing: border-box;
+}
+
+.redistribute-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  margin-top: 0.5rem;
+}
+
+.redistribute-card {
+  padding: 1rem 1.25rem;
+}
+
+.redistribute-card-title {
+  margin: 0 0 0.5rem 0;
+  font-size: 1.15rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.redistribute-card .redistribute-filter {
+  margin-bottom: 0.75rem;
+}
+
+.redistribute-card .redistribute-rows {
+  margin-top: 0.5rem;
 }
 
 .redistribute-rows {

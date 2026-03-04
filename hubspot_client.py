@@ -164,12 +164,21 @@ class HubSpotClient:
             json=body,
         )
         out = {str(lid): [] for lid in chunk}
-        for item in result.get("results", []):
-            from_id = item.get("from", {}).get("id")
-            to_list = item.get("to", [])
+        results = result.get("results")
+        if not isinstance(results, list):
+            return out
+        for item in results:
+            if not isinstance(item, dict):
+                continue
+            from_id = (item.get("from") or {}).get("id") if isinstance(item.get("from"), dict) else None
+            to_list = item.get("to")
+            if not isinstance(to_list, list):
+                to_list = []
             if from_id is not None:
                 out.setdefault(str(from_id), [])
                 for to_obj in to_list:
+                    if not isinstance(to_obj, dict):
+                        continue
                     to_id = to_obj.get("toObjectId") or to_obj.get("id")
                     if to_id is not None and str(to_id) not in out[str(from_id)]:
                         out[str(from_id)].append(str(to_id))

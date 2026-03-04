@@ -123,6 +123,14 @@ from holidays import set_storage as _holidays_set_storage
 
 _init_hubspot_cache_db()
 init_holidays_db()
+from redistribute_cache_db import (
+    init_redistribute_cache_db,
+    refresh_redistribute_cache,
+    get_counts_from_cache as _redistribute_get_counts_from_cache,
+    get_lead_rows_from_cache as _redistribute_get_lead_rows_from_cache,
+    cache_has_data as _redistribute_cache_has_data,
+)
+init_redistribute_cache_db()
 
 
 def _hubspot_holidays_load() -> dict:
@@ -1365,50 +1373,67 @@ def distribute():
 
 
 # --- Re-assign leads (redistribute another person's leads to available team members) ---
+def _normalize_team(team: str):
+    """Strip and match team against STAFF_LEAD_TEAMS; return exact name or None."""
+    from config import STAFF_LEAD_TEAMS
+    t = (team or "").strip()
+    if not t:
+        return None
+    if t in STAFF_LEAD_TEAMS:
+        return t
+    # Case-insensitive fallback for staging/frontend quirks
+    lower = t.lower()
+    for name in STAFF_LEAD_TEAMS:
+        if name.lower() == lower:
+            return name
+    return None
+
+
 @app.route("/api/reassign/preview", methods=["GET"])
 def reassign_preview():
     """GET ?owner_id=...&team=... (team = full name e.g. Inbound Lead Team). Returns counts and target_staff."""
-    owner_id = (request.args.get("owner_id") or "").strip()
-    team = (request.args.get("team") or "").strip()
-    if not owner_id or not team:
-        return jsonify({"error": "owner_id and team required"}), 400
     try:
-        from reassign import get_reassign_preview
-        from config import STAFF_LEAD_TEAMS
-        if team not in STAFF_LEAD_TEAMS:
+        owner_id = (request.args.get("owner_id") or "").strip()
+        team_raw = (request.args.get("team") or "").strip()
+        if not owner_id or not team_raw:
+            return jsonify({"error": "owner_id and team required"}), 400
+        team = _normalize_team(team_raw)
+        if not team:
             return jsonify({"error": "invalid team"}), 400
+        from reassign import get_reassign_preview
         client = get_client()
         out = get_reassign_preview(client, owner_id, team)
         return jsonify(out)
     except Exception as e:
         _log.exception("reassign preview failed")
-        return jsonify({"error": str(e)}), 500
+        err_msg = str(e) if e else "Unknown error"
+        return jsonify({"error": err_msg}), 500
 
 
 @app.route("/api/reassign/execute", methods=["POST"])
 def reassign_execute():
     """POST { owner_id, team, categories, target_owner_ids (optional) }. Reassigns contacts to selected staff only."""
-    data = request.get_json(silent=True) or {}
-    owner_id = (data.get("owner_id") or "").strip()
-    team = (data.get("team") or "").strip()
-    categories = data.get("categories")
-    if not isinstance(categories, list):
-        categories = []
-    categories = [c for c in categories if c in ("attempt_1", "attempt_2", "attempt_3", "call_back")]
-    target_owner_ids = data.get("target_owner_ids")
-    if isinstance(target_owner_ids, list):
-        target_owner_ids = [str(o).strip() for o in target_owner_ids if o]
-    else:
-        target_owner_ids = None
-    if not owner_id or not team:
-        return jsonify({"error": "owner_id and team required"}), 400
-    if not categories:
-        return jsonify({"error": "at least one category required"}), 400
     try:
-        from reassign import execute_reassign
-        from config import STAFF_LEAD_TEAMS
-        if team not in STAFF_LEAD_TEAMS:
+        data = request.get_json(silent=True) or {}
+        owner_id = (data.get("owner_id") or "").strip()
+        team_raw = (data.get("team") or "").strip()
+        categories = data.get("categories")
+        if not isinstance(categories, list):
+            categories = []
+        categories = [c for c in categories if c in ("attempt_1", "attempt_2", "attempt_3", "call_back")]
+        target_owner_ids = data.get("target_owner_ids")
+        if isinstance(target_owner_ids, list):
+            target_owner_ids = [str(o).strip() for o in target_owner_ids if o]
+        else:
+            target_owner_ids = None
+        if not owner_id or not team_raw:
+            return jsonify({"error": "owner_id and team required"}), 400
+        if not categories:
+            return jsonify({"error": "at least one category required"}), 400
+        team = _normalize_team(team_raw)
+        if not team:
             return jsonify({"error": "invalid team"}), 400
+        from reassign import execute_reassign
         client = get_client()
         result = execute_reassign(client, owner_id, team, categories, target_owner_ids=target_owner_ids)
         if result.get("error"):
@@ -1427,15 +1452,15 @@ def reassign_execute():
 @app.route("/api/reassign/callbacks", methods=["GET"])
 def reassign_callbacks():
     """GET ?owner_id=...&team=... Returns { callbacks: [...], target_staff: [...] } for Call Back Management."""
-    owner_id = (request.args.get("owner_id") or "").strip()
-    team = (request.args.get("team") or "").strip()
-    if not owner_id or not team:
-        return jsonify({"error": "owner_id and team required"}), 400
     try:
-        from reassign import list_callbacks
-        from config import STAFF_LEAD_TEAMS
-        if team not in STAFF_LEAD_TEAMS:
+        owner_id = (request.args.get("owner_id") or "").strip()
+        team_raw = (request.args.get("team") or "").strip()
+        if not owner_id or not team_raw:
+            return jsonify({"error": "owner_id and team required"}), 400
+        team = _normalize_team(team_raw)
+        if not team:
             return jsonify({"error": "invalid team"}), 400
+        from reassign import list_callbacks
         client = get_client()
         out = list_callbacks(client, owner_id, team)
         return jsonify(out)
@@ -1447,19 +1472,19 @@ def reassign_callbacks():
 @app.route("/api/reassign/assign-one", methods=["POST"])
 def reassign_assign_one():
     """POST { contact_id, new_owner_id, team }. Assigns a single contact to the new owner. team required so only same-team staff are allowed."""
-    data = request.get_json(silent=True) or {}
-    contact_id = (data.get("contact_id") or "").strip() or None
-    new_owner_id = (data.get("new_owner_id") or "").strip() or None
-    team = (data.get("team") or "").strip() or None
-    if not contact_id or not new_owner_id:
-        return jsonify({"success": False, "error": "contact_id and new_owner_id required"}), 400
-    if not team:
-        return jsonify({"success": False, "error": "team required"}), 400
     try:
-        from reassign import assign_single_contact
-        from config import STAFF_LEAD_TEAMS
-        if team not in STAFF_LEAD_TEAMS:
+        data = request.get_json(silent=True) or {}
+        contact_id = (data.get("contact_id") or "").strip() or None
+        new_owner_id = (data.get("new_owner_id") or "").strip() or None
+        team_raw = (data.get("team") or "").strip() or None
+        if not contact_id or not new_owner_id:
+            return jsonify({"success": False, "error": "contact_id and new_owner_id required"}), 400
+        if not team_raw:
+            return jsonify({"success": False, "error": "team required"}), 400
+        team = _normalize_team(team_raw)
+        if not team:
             return jsonify({"success": False, "error": "invalid team"}), 400
+        from reassign import assign_single_contact
         client = get_client()
         result = assign_single_contact(client, contact_id, new_owner_id, team_name=team)
         if not result.get("success"):
@@ -1477,7 +1502,8 @@ def reassign_assign_one():
 
 @app.route("/api/redistribute/counts", methods=["GET"])
 def api_redistribute_counts():
-    """GET ?last_days= (optional). Returns { counts: { reason: n, ... }, error?: string }."""
+    """GET ?last_days= (optional), ?lead_type= (optional). Returns { counts: { reason: n, ... }, error?: string }. Uses DB cache when available (refreshed every 2h)."""
+    from config import REDISTRIBUTE_LEAD_TYPES
     last_days = request.args.get("last_days")
     if last_days is not None and last_days != "":
         try:
@@ -1488,10 +1514,17 @@ def api_redistribute_counts():
             last_days = None
     else:
         last_days = None
+    lead_type = (request.args.get("lead_type") or "").strip() or None
+    if lead_type is not None and lead_type not in REDISTRIBUTE_LEAD_TYPES:
+        lead_type = None
     try:
+        if lead_type and os.getenv("DATABASE_URL") and _redistribute_cache_has_data():
+            out = _redistribute_get_counts_from_cache(lead_type, last_days)
+            if out is not None:
+                return jsonify(out)
         from redistribute import get_redistribute_counts
         client = get_client()
-        out = get_redistribute_counts(client, last_days=last_days)
+        out = get_redistribute_counts(client, last_days=last_days, lead_type=lead_type)
         return jsonify(out)
     except Exception as e:
         _log.exception("redistribute counts failed")
@@ -1500,7 +1533,7 @@ def api_redistribute_counts():
 
 @app.route("/api/redistribute/execute", methods=["POST"])
 def api_redistribute_execute():
-    """POST { reason, last_days? }. Re-distribute all leads for that reason (unassign contact, set Open Lead, move lead to new stage)."""
+    """POST { reason, last_days?, lead_type? }. Re-distribute using DB cache when available (avoids HubSpot search)."""
     data = request.get_json() or {}
     reason = (data.get("reason") or "").strip()
     last_days = data.get("last_days")
@@ -1513,13 +1546,27 @@ def api_redistribute_execute():
             last_days = None
     else:
         last_days = None
-    from config import REDISTRIBUTE_REASONS
+    from config import REDISTRIBUTE_REASONS, REDISTRIBUTE_LEAD_TYPES
+    lead_type = (data.get("lead_type") or "").strip() or None
+    if lead_type is not None and lead_type not in REDISTRIBUTE_LEAD_TYPES:
+        lead_type = None
     if not reason or reason not in REDISTRIBUTE_REASONS:
         return jsonify({"error": "reason required and must be one of: " + ", ".join(REDISTRIBUTE_REASONS)}), 400
     try:
-        from redistribute import execute_redistribute
         client = get_client()
-        result = execute_redistribute(client, reason, last_days=last_days)
+        if lead_type and os.getenv("DATABASE_URL") and _redistribute_cache_has_data():
+            rows = _redistribute_get_lead_rows_from_cache(lead_type, reason, last_days)
+            if rows is not None:
+                from redistribute import execute_redistribute_batch
+                result = execute_redistribute_batch(client, rows)
+                _log_activity(
+                    "redistribute",
+                    f"Re-distributed {result['redistributed']} lead(s) (reason: {reason}, from cache)",
+                    {"reason": reason, "redistributed": result["redistributed"], "errors": result.get("errors", [])[:20]},
+                )
+                return jsonify({"redistributed": result["redistributed"], "errors": result.get("errors", [])})
+        from redistribute import execute_redistribute
+        result = execute_redistribute(client, reason, last_days=last_days, lead_type=lead_type)
         if result.get("error"):
             return jsonify({"redistributed": result.get("redistributed", 0), "errors": result.get("errors", []), "error": result["error"]}), 400
         _log_activity(
@@ -1615,6 +1662,26 @@ if os.getenv("DATABASE_URL"):
     _warmer_thread = threading.Thread(target=_cache_warmer_loop, daemon=True, name="cache-warmer")
     _warmer_thread.start()
     _log.info("HubSpot cache warmer started (runs every 2 min)")
+
+
+def _redistribute_cache_loop() -> None:
+    """Background loop: wait 2 min, then refresh unqualified leads cache every 2 hours (configurable)."""
+    from config import REDISTRIBUTE_CACHE_REFRESH_INTERVAL_SECONDS
+    time.sleep(120)  # First run 2 min after startup
+    while True:
+        try:
+            if HUBSPOT_ACCESS_TOKEN:
+                client = get_client()
+                refresh_redistribute_cache(client)
+        except Exception as e:
+            _log.exception("Redistribute cache refresh error: %s", e)
+        time.sleep(REDISTRIBUTE_CACHE_REFRESH_INTERVAL_SECONDS)
+
+
+if os.getenv("DATABASE_URL"):
+    _redistribute_cache_thread = threading.Thread(target=_redistribute_cache_loop, daemon=True, name="redistribute-cache")
+    _redistribute_cache_thread.start()
+    _log.info("Redistribute cache refresh started (every 2 hours)")
 
 if __name__ == "__main__":
     import os

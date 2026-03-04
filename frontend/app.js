@@ -198,9 +198,11 @@
   }
 
   var REDISTRIBUTE_REASONS = ['Volume', 'No Response', 'Maybe (wants to think)'];
+  var REDISTRIBUTE_LEAD_TYPES = ['Inbound Lead', 'PIP Lead', 'Frosties lead', 'Panther Lead'];
 
-  function getRedistributeLastDays() {
-    var input = document.getElementById('redistribute-last-days');
+  function getRedistributeLastDaysFromCard(card) {
+    if (!card) return undefined;
+    var input = card.querySelector('.redistribute-last-days-input');
     if (!input) return undefined;
     var val = (input.value || '').trim();
     if (val === '') return undefined;
@@ -211,61 +213,105 @@
   function loadRedistributeTab() {
     var loadingEl = document.getElementById('redistribute-loading');
     var errorEl = document.getElementById('redistribute-error');
-    var rowsEl = document.getElementById('redistribute-rows');
-    var tbody = document.getElementById('redistribute-tbody');
-    if (!tbody) return;
+    var cardsContainer = document.getElementById('redistribute-cards');
+    if (!cardsContainer) return;
     if (loadingEl) loadingEl.hidden = false;
     if (errorEl) { errorEl.hidden = true; errorEl.textContent = ''; }
-    if (rowsEl) rowsEl.hidden = true;
-    var lastDays = getRedistributeLastDays();
-    var qs = lastDays != null ? '?last_days=' + encodeURIComponent(lastDays) : '';
-    qs += (qs ? '&' : '?') + 'v=' + Date.now();
-    fetch(API + '/redistribute/counts' + qs, { cache: 'no-store' })
-      .then(parseJsonResponse).then(function (data) {
+    cardsContainer.innerHTML = '';
+    REDISTRIBUTE_LEAD_TYPES.forEach(function (leadType) {
+      var card = document.createElement('div');
+      card.className = 'redistribute-card card';
+      card.setAttribute('data-lead-type', leadType);
+      card.innerHTML =
+        '<h3 class="redistribute-card-title">' + escapeHtml(leadType) + '</h3>' +
+        '<p class="hint">Filter by when they entered the unqualified stage, then re-distribute to make them open again.</p>' +
+        '<div class="redistribute-filter">' +
+        '  <label>Filter by last</label>' +
+        '  <input type="number" class="redistribute-last-days-input" min="1" placeholder="e.g. 30" aria-label="Number of days for ' + escapeHtml(leadType) + '" />' +
+        '  <span>days (leave empty for all time)</span>' +
+        '</div>' +
+        '<div class="redistribute-card-loading loading" hidden>Loading…</div>' +
+        '<div class="redistribute-rows" hidden>' +
+        '  <table class="table redistribute-table">' +
+        '    <thead><tr><th>Disqualification reason</th><th>Count</th><th></th></tr></thead>' +
+        '    <tbody class="redistribute-tbody"></tbody>' +
+        '  </table>' +
+        '</div>';
+      cardsContainer.appendChild(card);
+    });
+    var cards = cardsContainer.querySelectorAll('.redistribute-card');
+    var promises = Array.prototype.map.call(cards, function (card) {
+      var leadType = card.getAttribute('data-lead-type');
+      var lastDays = getRedistributeLastDaysFromCard(card);
+      var qs = '?lead_type=' + encodeURIComponent(leadType);
+      if (lastDays != null) qs += '&last_days=' + encodeURIComponent(lastDays);
+      qs += '&v=' + Date.now();
+      return fetch(API + '/redistribute/counts' + qs, { cache: 'no-store' })
+        .then(parseJsonResponse)
+        .then(function (data) { return { card: card, leadType: leadType, data: data }; });
+    });
+    Promise.all(promises).then(function (results) {
       if (loadingEl) loadingEl.hidden = true;
-      if (data.error) {
-        if (errorEl) { errorEl.textContent = data.error; errorEl.hidden = false; }
-        return;
-      }
-      if (data.message && errorEl) {
-        errorEl.textContent = data.message;
-        errorEl.hidden = false;
-      } else if (errorEl) errorEl.hidden = true;
-      var counts = data.counts || {};
-      tbody.innerHTML = '';
-      REDISTRIBUTE_REASONS.forEach(function (reason) {
-        var n = counts[reason] != null ? counts[reason] : 0;
-        var tr = document.createElement('tr');
-        tr.innerHTML = '<td>' + escapeHtml(reason) + '</td><td>' + n + '</td><td><button type="button" class="btn btn-secondary redistribute-do-btn" data-reason="' + escapeHtml(reason) + '" ' + (n === 0 ? 'disabled' : '') + '>Re-distribute</button></td>';
-        var btn = tr.querySelector('.redistribute-do-btn');
-        if (btn && n > 0) {
-          btn.addEventListener('click', function () {
-            var r = this.getAttribute('data-reason');
-            if (!r) return;
-            if (!confirm('Re-distribute all ' + (counts[r] || 0) + ' lead(s) with reason "' + r + '"? This will unassign the contact, set lead status to Open Lead, and move the lead to the new stage.')) return;
-            this.disabled = true;
-            fetch(API + '/redistribute/execute', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              credentials: 'same-origin',
-              body: JSON.stringify({ reason: r, last_days: getRedistributeLastDays() || null }),
-            }).then(parseJsonResponse).then(function (res) {
-              if (res.error) {
-                alert(res.error);
-                btn.disabled = false;
-                return;
-              }
-              alert('Re-distributed ' + (res.redistributed || 0) + ' lead(s).' + (res.errors && res.errors.length ? ' Some errors: ' + res.errors.length : ''));
-              loadRedistributeTab();
-            }).catch(function (err) {
-              alert(err && err.message ? err.message : 'There was a problem with the request. Check your connection and try again.');
-              btn.disabled = false;
-            });
-          });
+      var hasError = false;
+      results.forEach(function (r) {
+        var card = r.card;
+        var leadType = r.leadType;
+        var data = r.data;
+        var cardLoading = card.querySelector('.redistribute-card-loading');
+        var rowsWrap = card.querySelector('.redistribute-rows');
+        var tbody = card.querySelector('.redistribute-tbody');
+        if (cardLoading) cardLoading.hidden = true;
+        if (data.error) {
+          if (errorEl && !hasError) {
+            errorEl.textContent = data.error;
+            errorEl.hidden = false;
+            hasError = true;
+          }
+          return;
         }
-        tbody.appendChild(tr);
+        if (!tbody) return;
+        tbody.innerHTML = '';
+        var counts = data.counts || {};
+        REDISTRIBUTE_REASONS.forEach(function (reason) {
+          var n = counts[reason] != null ? counts[reason] : 0;
+          var tr = document.createElement('tr');
+          tr.innerHTML = '<td>' + escapeHtml(reason) + '</td><td>' + n + '</td><td><button type="button" class="btn btn-secondary redistribute-do-btn" data-reason="' + escapeHtml(reason) + '" ' + (n === 0 ? 'disabled' : '') + '>Re-distribute</button></td>';
+          var btn = tr.querySelector('.redistribute-do-btn');
+          if (btn && n > 0) {
+            btn.addEventListener('click', function () {
+              var reasonVal = this.getAttribute('data-reason');
+              if (!reasonVal) return;
+              if (!confirm('Re-distribute all ' + (counts[reasonVal] || 0) + ' lead(s) with reason "' + reasonVal + '" for ' + leadType + '? This will unassign the contact, set lead status to Open Lead, and move the lead to the new stage.')) return;
+              this.disabled = true;
+              var payload = {
+                reason: reasonVal,
+                last_days: getRedistributeLastDaysFromCard(card) || null,
+                lead_type: leadType,
+              };
+              fetch(API + '/redistribute/execute', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'same-origin',
+                body: JSON.stringify(payload),
+              }).then(parseJsonResponse).then(function (res) {
+                if (res.error) {
+                  alert(res.error);
+                  btn.disabled = false;
+                  return;
+                }
+                alert('Re-distributed ' + (res.redistributed || 0) + ' lead(s).' + (res.errors && res.errors.length ? ' Some errors: ' + res.errors.length : ''));
+                loadRedistributeTab();
+              }).catch(function (err) {
+                alert(err && err.message ? err.message : 'There was a problem with the request. Check your connection and try again.');
+                btn.disabled = false;
+              });
+            });
+          }
+          tbody.appendChild(tr);
+        });
+        if (rowsWrap) rowsWrap.hidden = false;
       });
-      if (rowsEl) rowsEl.hidden = false;
+      if (!hasError && errorEl) errorEl.hidden = true;
     }).catch(function (err) {
       if (loadingEl) loadingEl.hidden = true;
       if (errorEl) {
@@ -2749,11 +2795,15 @@
 
   tabs();
   (function () {
-    var input = document.getElementById('redistribute-last-days');
-    if (input) input.addEventListener('change', function () {
-      var panel = document.getElementById('redistribute');
-      if (panel && panel.classList.contains('active')) loadRedistributeTab();
-    });
+    var cardsContainer = document.getElementById('redistribute-cards');
+    if (cardsContainer) {
+      cardsContainer.addEventListener('change', function (e) {
+        if (e.target && e.target.classList.contains('redistribute-last-days-input')) {
+          var panel = document.getElementById('redistribute');
+          if (panel && panel.classList.contains('active')) loadRedistributeTab();
+        }
+      });
+    }
   })();
   // Global fallback: after 90s replace Staff/Unallocated "Loading…" with timeout (redistribute tab has no limit)
   setTimeout(function () {

@@ -193,26 +193,10 @@
           <h2>Re-Distribute Leads</h2>
           <span class="squiggle" aria-hidden="true"></span>
         </div>
-        <p class="hint">Unqualified leads by reason. Filter by when they entered the unqualified stage, then re-distribute to make them open again.</p>
-        <div class="redistribute-filter">
-          <label for="redistribute-last-days">Filter by last</label>
-          <input type="number" id="redistribute-last-days" class="redistribute-last-days-input" min="1" placeholder="e.g. 30" aria-label="Number of days" />
-          <span>days (leave empty for all time)</span>
-        </div>
+        <p class="hint">Unqualified leads by reason and lead type. Filter by when they entered the unqualified stage, then re-distribute to make them open again.</p>
         <div id="redistribute-loading" class="loading" hidden>Loading…</div>
         <div id="redistribute-error" class="error" hidden></div>
-        <div id="redistribute-rows" class="redistribute-rows" hidden>
-          <table class="table redistribute-table">
-            <thead>
-              <tr>
-                <th>Disqualification reason</th>
-                <th>Count</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody id="redistribute-tbody"></tbody>
-          </table>
-        </div>
+        <div id="redistribute-cards" class="redistribute-cards"></div>
       </div>
     </section>
 
