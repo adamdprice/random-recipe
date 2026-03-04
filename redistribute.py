@@ -5,8 +5,12 @@ and allow re-opening them (unassign contact, set Open Lead, move lead to new sta
 from __future__ import annotations
 
 import logging
+import time
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
+
+# Max time (seconds) to spend in HubSpot search loop so we respond before frontend 25s timeout
+REDISTRIBUTE_COUNTS_DEADLINE_SECONDS = 22
 
 from hubspot_client import HubSpotClient
 from config import (
@@ -80,7 +84,11 @@ def get_redistribute_counts(
         all_results = []
         after = None
         max_pages = 20  # cap at 2000 leads to avoid infinite pagination
+        deadline = time.monotonic() + REDISTRIBUTE_COUNTS_DEADLINE_SECONDS
         for _ in range(max_pages):
+            if time.monotonic() >= deadline:
+                _log.warning("redistribute counts: hit time limit, returning partial counts")
+                break
             res = client.search_leads(
                 filter_groups=filter_groups,
                 properties=properties,
