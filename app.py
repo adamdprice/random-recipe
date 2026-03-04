@@ -639,19 +639,20 @@ def _count_unallocated_contacts(client: HubSpotClient, lead_priority_values: lis
 
 @app.route("/api/lead-teams", methods=["GET"])
 def list_lead_teams():
-    if not HUBSPOT_LEAD_TEAM_OBJECT_ID:
-        return jsonify({"lead_teams": [], "message": "HUBSPOT_LEAD_TEAM_OBJECT_ID not set"}), 200
-    if request.args.get("refresh") != "1":
-        cached = _hubspot_cache_get("lead_teams")
-        if cached is not None:
-            return jsonify(cached)
     try:
+        if not HUBSPOT_LEAD_TEAM_OBJECT_ID:
+            return jsonify({"lead_teams": [], "message": "HUBSPOT_LEAD_TEAM_OBJECT_ID not set"}), 200
+        if request.args.get("refresh") != "1":
+            cached = _hubspot_cache_get("lead_teams")
+            if cached is not None:
+                return jsonify(cached)
         client = get_client()
         out = _fetch_lead_teams_from_hubspot(client)
         _hubspot_cache_set("lead_teams", out)
         return jsonify(out)
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        _log.exception("list_lead_teams failed")
+        return _safe_json_response({"error": str(e) if e else "Unknown error", "lead_teams": []}, 500)
 
 
 def _prop_value(props: dict, key: str):
@@ -1010,11 +1011,11 @@ STAFF_FETCH_TIMEOUT_SECONDS = 75
 
 @app.route("/api/staff", methods=["GET"])
 def list_staff():
-    if request.args.get("refresh") != "1":
-        cached = _hubspot_cache_get("staff")
-        if cached is not None:
-            return jsonify(cached)
     try:
+        if request.args.get("refresh") != "1":
+            cached = _hubspot_cache_get("staff")
+            if cached is not None:
+                return jsonify(cached)
         client = get_client()
         result_holder: list = []
         exc_holder: list = []
@@ -1031,31 +1032,33 @@ def list_staff():
         if exc_holder:
             raise exc_holder[0]
         if not result_holder:
-            return jsonify({
+            return _safe_json_response({
                 "error": "Staff list is taking too long to load. Try again in a moment or click Refresh.",
                 "staff": [],
-            }), 503
+            }, 503)
         out = result_holder[0]
         _hubspot_cache_set("staff", out)
         return jsonify(out)
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        _log.exception("list_staff failed")
+        return _safe_json_response({"error": str(e) if e else "Unknown error", "staff": []}, 500)
 
 
 @app.route("/api/owners", methods=["GET"])
 def list_owners():
     """Return HubSpot owners (for creating a new staff member)."""
-    if request.args.get("refresh") != "1":
-        cached = _hubspot_cache_get("owners")
-        if cached is not None:
-            return jsonify(cached)
     try:
+        if request.args.get("refresh") != "1":
+            cached = _hubspot_cache_get("owners")
+            if cached is not None:
+                return jsonify(cached)
         client = get_client()
         payload = _fetch_owners_from_hubspot(client)
         _hubspot_cache_set("owners", payload)
         return jsonify(payload)
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        _log.exception("list_owners failed")
+        return _safe_json_response({"error": str(e) if e else "Unknown error", "owners": []}, 500)
 
 
 @app.route("/api/staff", methods=["POST"])
@@ -1157,13 +1160,14 @@ def create_staff():
 # --- Holidays (staff blocked dates) ---
 @app.route("/api/holidays", methods=["GET"])
 def api_list_holidays():
-    staff_id = request.args.get("staff_id")
     try:
+        staff_id = request.args.get("staff_id")
         from holidays import list_holidays
         holidays = list_holidays(staff_id=staff_id if staff_id else None)
         return jsonify({"holidays": holidays})
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        _log.exception("api_list_holidays failed")
+        return _safe_json_response({"error": str(e) if e else "Unknown error", "holidays": []}, 500)
 
 
 @app.route("/api/holidays", methods=["POST"])
