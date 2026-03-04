@@ -132,6 +132,14 @@ class HubSpotClient:
             body["after"] = after
         return self._request("POST", "/crm/v3/objects/leads/search", json=body)
 
+    def patch_lead(self, lead_id: str, properties: dict) -> dict:
+        """PATCH a lead by ID. Properties e.g. hs_pipeline_stage, hs_lead_disqualification_reason."""
+        return self._request(
+            "PATCH",
+            f"/crm/v3/objects/leads/{lead_id}",
+            json={"properties": properties},
+        )
+
     def get_lead_to_contact_associations_batch(self, lead_ids: list[str]) -> dict:
         """Get associated contact IDs for each lead. POST /crm/v4/associations/leads/contacts/batch/read.
         Returns dict: { lead_id: [contact_id, ...], ... }. Leads with no contact are omitted or have [].

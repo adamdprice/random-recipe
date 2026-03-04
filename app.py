@@ -1418,6 +1418,64 @@ def reassign_assign_one():
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+@app.route("/api/redistribute/counts", methods=["GET"])
+def api_redistribute_counts():
+    """GET ?last_days= (optional). Returns { counts: { reason: n, ... }, error?: string }."""
+    last_days = request.args.get("last_days")
+    if last_days is not None and last_days != "":
+        try:
+            last_days = int(last_days)
+            if last_days <= 0:
+                last_days = None
+        except (TypeError, ValueError):
+            last_days = None
+    else:
+        last_days = None
+    try:
+        from redistribute import get_redistribute_counts
+        client = get_client()
+        out = get_redistribute_counts(client, last_days=last_days)
+        return jsonify(out)
+    except Exception as e:
+        _log.exception("redistribute counts failed")
+        return jsonify({"counts": {}, "error": str(e)}), 500
+
+
+@app.route("/api/redistribute/execute", methods=["POST"])
+def api_redistribute_execute():
+    """POST { reason, last_days? }. Re-distribute all leads for that reason (unassign contact, set Open Lead, move lead to new stage)."""
+    data = request.get_json() or {}
+    reason = (data.get("reason") or "").strip()
+    last_days = data.get("last_days")
+    if last_days is not None and last_days != "":
+        try:
+            last_days = int(last_days)
+            if last_days <= 0:
+                last_days = None
+        except (TypeError, ValueError):
+            last_days = None
+    else:
+        last_days = None
+    from config import REDISTRIBUTE_REASONS
+    if not reason or reason not in REDISTRIBUTE_REASONS:
+        return jsonify({"error": "reason required and must be one of: " + ", ".join(REDISTRIBUTE_REASONS)}), 400
+    try:
+        from redistribute import execute_redistribute
+        client = get_client()
+        result = execute_redistribute(client, reason, last_days=last_days)
+        if result.get("error"):
+            return jsonify({"redistributed": result.get("redistributed", 0), "errors": result.get("errors", []), "error": result["error"]}), 400
+        _log_activity(
+            "redistribute",
+            f"Re-distributed {result['redistributed']} lead(s) (reason: {reason})",
+            {"reason": reason, "redistributed": result["redistributed"], "errors": result.get("errors", [])[:20]},
+        )
+        return jsonify({"redistributed": result["redistributed"], "errors": result.get("errors", [])})
+    except Exception as e:
+        _log.exception("redistribute execute failed")
+        return jsonify({"redistributed": 0, "errors": [], "error": str(e)}), 500
+
+
 # Ensure API errors never return HTML (so frontend never sees "Unexpected token '<'" from our app)
 @app.errorhandler(500)
 def api_500_json(e):

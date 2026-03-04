@@ -700,6 +700,35 @@ code {
   background: var(--accent-light);
 }
 
+.redistribute-filter {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+  flex-wrap: wrap;
+}
+
+.redistribute-filter label {
+  font-weight: 500;
+  color: var(--text);
+}
+
+.redistribute-last-days-input {
+  width: 5rem;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 1rem;
+}
+
+.redistribute-rows {
+  margin-top: 0.5rem;
+}
+
+.redistribute-rows .table-wrap {
+  margin-top: 0;
+}
+
 .table input[type="number"],
 .table select {
   padding: 0.4rem 0.6rem;

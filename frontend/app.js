@@ -161,8 +161,85 @@
         if (tab === 'team-mgmt') leadTeamsTable();
         if (tab === 'staff-mgmt') renderUnallocatedGauges();
         if (tab === 'call-activity') loadCallActivityTab();
+        if (tab === 'redistribute') loadRedistributeTab();
       });
     });
+  }
+
+  var REDISTRIBUTE_REASONS = ['Volume', 'No Response', 'Maybe (wants to think)'];
+
+  function getRedistributeLastDays() {
+    var input = document.getElementById('redistribute-last-days');
+    if (!input) return undefined;
+    var val = (input.value || '').trim();
+    if (val === '') return undefined;
+    var n = parseInt(val, 10);
+    return (n > 0) ? n : undefined;
+  }
+
+  function loadRedistributeTab() {
+    var loadingEl = document.getElementById('redistribute-loading');
+    var errorEl = document.getElementById('redistribute-error');
+    var rowsEl = document.getElementById('redistribute-rows');
+    var tbody = document.getElementById('redistribute-tbody');
+    if (!tbody) return;
+    if (loadingEl) loadingEl.hidden = false;
+    if (errorEl) { errorEl.hidden = true; errorEl.textContent = ''; }
+    if (rowsEl) rowsEl.hidden = true;
+    var lastDays = getRedistributeLastDays();
+    var qs = lastDays != null ? '?last_days=' + encodeURIComponent(lastDays) : '';
+    fetch(API + '/redistribute/counts' + qs).then(parseJsonResponse).then(function (data) {
+      if (loadingEl) loadingEl.hidden = true;
+      if (data.error) {
+        if (errorEl) { errorEl.textContent = data.error; errorEl.hidden = false; }
+        return;
+      }
+      var counts = data.counts || {};
+      tbody.innerHTML = '';
+      REDISTRIBUTE_REASONS.forEach(function (reason) {
+        var n = counts[reason] != null ? counts[reason] : 0;
+        var tr = document.createElement('tr');
+        tr.innerHTML = '<td>' + escapeHtml(reason) + '</td><td>' + n + '</td><td><button type="button" class="btn btn-secondary redistribute-do-btn" data-reason="' + escapeHtml(reason) + '" ' + (n === 0 ? 'disabled' : '') + '>Re-distribute</button></td>';
+        var btn = tr.querySelector('.redistribute-do-btn');
+        if (btn && n > 0) {
+          btn.addEventListener('click', function () {
+            var r = this.getAttribute('data-reason');
+            if (!r) return;
+            if (!confirm('Re-distribute all ' + (counts[r] || 0) + ' lead(s) with reason “‘ + r + '”? This will unassign the contact, set lead status to Open Lead, and move the lead to the new stage.')) return;
+            this.disabled = true;
+            fetch(API + '/redistribute/execute', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              credentials: 'same-origin',
+              body: JSON.stringify({ reason: r, last_days: getRedistributeLastDays() || null }),
+            }).then(parseJsonResponse).then(function (res) {
+              if (res.error) {
+                alert(res.error);
+                btn.disabled = false;
+                return;
+              }
+              alert('Re-distributed ' + (res.redistributed || 0) + ' lead(s).' + (res.errors && res.errors.length ? ' Some errors: ' + res.errors.length : ''));
+              loadRedistributeTab();
+            }).catch(function (err) {
+              alert(err && err.message ? err.message : 'Request failed');
+              btn.disabled = false;
+            });
+          });
+        }
+        tbody.appendChild(tr);
+      });
+      if (rowsEl) rowsEl.hidden = false;
+    }).catch(function (err) {
+      if (loadingEl) loadingEl.hidden = true;
+      if (errorEl) { errorEl.textContent = (err && err.message) ? err.message : 'Failed to load'; errorEl.hidden = false; }
+    });
+  }
+
+  function escapeHtml(s) {
+    if (s == null) return '';
+    var div = document.createElement('div');
+    div.textContent = s;
+    return div.innerHTML;
   }
 
   function loadCallActivityTab() {
@@ -2607,6 +2684,13 @@
   }
 
   tabs();
+  (function () {
+    var input = document.getElementById('redistribute-last-days');
+    if (input) input.addEventListener('change', function () {
+      var panel = document.getElementById('redistribute');
+      if (panel && panel.classList.contains('active')) loadRedistributeTab();
+    });
+  })();
   // Load only the default tab (Staff Management) on init; other tabs load when selected
   staffTable();
   renderUnallocatedGauges();

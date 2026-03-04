@@ -71,3 +71,15 @@ REASSIGN_CALL_BACK_DATE_PROPERTY = "call_back_date"
 REASSIGN_TAG_ATTEMPT_1 = "37295391"
 REASSIGN_TAG_ATTEMPT_2 = "37295488"
 REASSIGN_TAG_ATTEMPT_3 = "37295491"
+
+# Re-Distribute Leads: unqualified leads by disqualification reason, then re-open
+REDISTRIBUTE_LEAD_PIPELINE_ID = os.getenv("REDISTRIBUTE_LEAD_PIPELINE_ID", "lead-pipeline-id").strip()
+REDISTRIBUTE_UNQUALIFIED_STAGE_ID = os.getenv("REDISTRIBUTE_UNQUALIFIED_STAGE_ID", "unqualified-stage-id").strip()
+REDISTRIBUTE_NEW_STAGE_ID = os.getenv("REDISTRIBUTE_NEW_STAGE_ID", "new-stage-id").strip()
+REDISTRIBUTE_DISQUALIFICATION_PROPERTY = os.getenv("REDISTRIBUTE_DISQUALIFICATION_PROPERTY", "hs_lead_disqualification_reason").strip()
+REDISTRIBUTE_DATE_ENTERED_PROPERTY = os.getenv("REDISTRIBUTE_DATE_ENTERED_PROPERTY", "hs_v2_date_entered_unqualified_stage_id_1675714327").strip()
+REDISTRIBUTE_REASONS = ["Volume", "No Response", "Maybe (wants to think)"]
+REDISTRIBUTE_OPEN_LEAD_STATUS = os.getenv("REDISTRIBUTE_OPEN_LEAD_STATUS", "Open Lead").strip()
+# Staging only: if set, only show leads whose name contains this string (e.g. "TestABC")
+REDISTRIBUTE_STAGING_NAME_CONTAINS = os.getenv("REDISTRIBUTE_STAGING_NAME_CONTAINS", "").strip()
+REDISTRIBUTE_LEAD_NAME_PROPERTY = os.getenv("REDISTRIBUTE_LEAD_NAME_PROPERTY", "hs_name").strip()
