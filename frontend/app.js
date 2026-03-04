@@ -3,6 +3,37 @@
   var staffCache = [];
   var lastPauseLeadsOptions = [];
 
+  // Timeout for Staff Management / main dashboard only (redistribute tab has no timeout)
+  var FETCH_TIMEOUT_MS = 90000;
+
+  function showLoadingError(loadingEl, errEl, msg) {
+    msg = msg || 'Request timed out. Try a hard refresh (Cmd+Shift+R) or check the server.';
+    if (loadingEl) {
+      loadingEl.textContent = msg;
+      loadingEl.classList.add('error');
+      loadingEl.classList.remove('loading');
+    }
+    if (errEl) {
+      errEl.textContent = msg;
+      errEl.hidden = false;
+      errEl.removeAttribute('hidden');
+    }
+  }
+
+  function fetchWithTimeout(url, options, timeoutMs) {
+    timeoutMs = timeoutMs || FETCH_TIMEOUT_MS;
+    var c = new AbortController();
+    var t = setTimeout(function () { c.abort(); }, timeoutMs);
+    var opts = Object.assign({}, options || {}, { signal: c.signal });
+    return fetch(url, opts).then(function (r) {
+      clearTimeout(t);
+      return r;
+    }, function (err) {
+      clearTimeout(t);
+      throw err;
+    });
+  }
+
   function parseJsonResponse(res) {
     return res.text().then(function (text) {
       var ct = (res.headers.get('content-type') || '').toLowerCase();
@@ -60,7 +91,7 @@
       if (failEl) failEl.hidden = connected;
     }
     showLoading();
-    fetch(API + '/health')
+    fetchWithTimeout(API + '/health')
       .then(function (r) { return r.json(); })
       .then(function (d) {
         showResult(!!d.hubspot_configured);
@@ -188,16 +219,18 @@
     if (rowsEl) rowsEl.hidden = true;
     var lastDays = getRedistributeLastDays();
     var qs = lastDays != null ? '?last_days=' + encodeURIComponent(lastDays) : '';
-    var controller = new AbortController();
-    var timeoutId = setTimeout(function () { controller.abort(); }, 25000);
-    fetch(API + '/redistribute/counts' + qs, { signal: controller.signal })
-      .then(function (r) { clearTimeout(timeoutId); return r; })
+    qs += (qs ? '&' : '?') + 'v=' + Date.now();
+    fetch(API + '/redistribute/counts' + qs, { cache: 'no-store' })
       .then(parseJsonResponse).then(function (data) {
       if (loadingEl) loadingEl.hidden = true;
       if (data.error) {
         if (errorEl) { errorEl.textContent = data.error; errorEl.hidden = false; }
         return;
       }
+      if (data.message && errorEl) {
+        errorEl.textContent = data.message;
+        errorEl.hidden = false;
+      } else if (errorEl) errorEl.hidden = true;
       var counts = data.counts || {};
       tbody.innerHTML = '';
       REDISTRIBUTE_REASONS.forEach(function (reason) {
@@ -209,7 +242,7 @@
           btn.addEventListener('click', function () {
             var r = this.getAttribute('data-reason');
             if (!r) return;
-            if (!confirm('Re-distribute all ' + (counts[r] || 0) + ' lead(s) with reason “‘ + r + '”? This will unassign the contact, set lead status to Open Lead, and move the lead to the new stage.')) return;
+            if (!confirm('Re-distribute all ' + (counts[r] || 0) + ' lead(s) with reason "' + r + '"? This will unassign the contact, set lead status to Open Lead, and move the lead to the new stage.')) return;
             this.disabled = true;
             fetch(API + '/redistribute/execute', {
               method: 'POST',
@@ -225,7 +258,7 @@
               alert('Re-distributed ' + (res.redistributed || 0) + ' lead(s).' + (res.errors && res.errors.length ? ' Some errors: ' + res.errors.length : ''));
               loadRedistributeTab();
             }).catch(function (err) {
-              alert(err && err.message ? err.message : 'Request failed');
+              alert(err && err.message ? err.message : 'There was a problem with the request. Check your connection and try again.');
               btn.disabled = false;
             });
           });
@@ -234,11 +267,11 @@
       });
       if (rowsEl) rowsEl.hidden = false;
     }).catch(function (err) {
-      clearTimeout(timeoutId);
       if (loadingEl) loadingEl.hidden = true;
-      var msg = (err && err.message) ? err.message : 'Failed to load';
-      if (err && err.name === 'AbortError') msg = 'Request timed out. Check your pipeline/stage config and try again.';
-      if (errorEl) { errorEl.textContent = msg; errorEl.hidden = false; }
+      if (errorEl) {
+        errorEl.textContent = (err && err.message) ? err.message : 'There was a problem with the request. Check your connection and try again.';
+        errorEl.hidden = false;
+      }
     });
   }
 
@@ -279,9 +312,15 @@
     loadingEl.hidden = false;
     errEl.hidden = true;
     container.hidden = true;
-    fetch(API + '/lead-teams')
+    var gaugeFallback = setTimeout(function () {
+      if (loadingEl && (loadingEl.textContent || '').indexOf('Loading') !== -1) {
+        showLoadingError(loadingEl, errEl, 'Request timed out. Try hard refresh (Cmd+Shift+R) or check the server.');
+      }
+    }, 92000);
+    fetchWithTimeout(API + '/lead-teams')
       .then(function (r) { return r.json(); })
       .then(function (data) {
+        clearTimeout(gaugeFallback);
         loadingEl.hidden = true;
         if (data.error) {
           errEl.textContent = data.error;
@@ -382,9 +421,13 @@
         });
       })
       .catch(function (e) {
+        clearTimeout(gaugeFallback);
         loadingEl.hidden = true;
-        errEl.textContent = e.message || 'Failed to load unallocated counts';
-        errEl.hidden = false;
+        if (errEl) {
+          errEl.textContent = (e.name === 'AbortError' ? 'Request timed out. Check your connection or try again.' : (e.message || 'Failed to load unallocated counts'));
+          errEl.hidden = false;
+          errEl.removeAttribute('hidden');
+        }
       });
   }
 
@@ -395,7 +438,7 @@
     const tbody = table.querySelector('tbody');
     const empty = document.getElementById('lead-teams-empty');
 
-    fetch(API + '/lead-teams')
+    fetchWithTimeout(API + '/lead-teams')
       .then(function (r) { return r.json(); })
       .then(function (data) {
         loading.hidden = true;
@@ -459,7 +502,7 @@
       })
       .catch(function (e) {
         loading.hidden = true;
-        errEl.textContent = e.message || 'Failed to load lead teams';
+        errEl.textContent = (e.name === 'AbortError' ? 'Request timed out. Check your connection or try again.' : (e.message || 'Failed to load lead teams'));
         errEl.hidden = false;
       });
   }
@@ -1658,11 +1701,22 @@
     const activeTbody = document.querySelector('#staff-table-active tbody');
     const inactiveTbody = document.querySelector('#staff-table-inactive tbody');
 
+    function showStaffError(msg) {
+      showLoadingError(loading, errEl, msg || 'Request timed out. Try hard refresh (Cmd+Shift+R).');
+      if (loading) loading.hidden = false;
+    }
+    var fallback = setTimeout(function () {
+      if (loading && (loading.textContent || '').indexOf('Loading') !== -1) {
+        showStaffError('Request timed out. Try hard refresh (Cmd+Shift+R) or check the server.');
+      }
+    }, 92000);
+
     Promise.all([
-      fetch(API + '/staff').then(parseJsonResponse),
-      fetch(API + '/staff/field-options/pause_leads').then(parseJsonResponse),
+      fetchWithTimeout(API + '/staff').then(parseJsonResponse),
+      fetchWithTimeout(API + '/staff/field-options/pause_leads').then(parseJsonResponse),
     ])
       .then(function (results) {
+        clearTimeout(fallback);
         const data = results[0];
         const optionsData = results[1];
         loading.hidden = true;
@@ -1690,9 +1744,8 @@
         renderStaffCards('cards-c', active, inactive, pauseLeadsOptions);
       })
       .catch(function (e) {
-        loading.hidden = true;
-        errEl.textContent = e.message || 'Failed to load staff';
-        errEl.hidden = false;
+        clearTimeout(fallback);
+        showStaffError(e.name === 'AbortError' ? 'Request timed out. Check your connection or try again.' : (e.message || 'Failed to load staff'));
       });
   }
 
@@ -2698,6 +2751,20 @@
       if (panel && panel.classList.contains('active')) loadRedistributeTab();
     });
   })();
+  // Global fallback: after 90s replace Staff/Unallocated "Loading…" with timeout (redistribute tab has no limit)
+  setTimeout(function () {
+    var ids = ['staff-loading', 'unallocated-gauges-loading'];
+    var msg = 'Request timed out. Try hard refresh (Cmd+Shift+R) or check the server.';
+    ids.forEach(function (id) {
+      var el = document.getElementById(id);
+      if (el && (el.textContent || '').indexOf('Loading') !== -1 && !el.hidden) {
+        el.textContent = msg;
+        el.classList.add('error');
+        el.classList.remove('loading');
+      }
+    });
+  }, 90000);
+
   // Load only the default tab (Staff Management) on init; other tabs load when selected
   staffTable();
   renderUnallocatedGauges();

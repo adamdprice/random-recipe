@@ -11,6 +11,9 @@ HUBSPOT_LEAD_PIPELINE_STAGE = os.getenv("HUBSPOT_LEAD_PIPELINE_STAGE", "new-stag
 # Optional: if set, webhook requests must include this in X-Webhook-Secret header or ?secret= query
 WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "").strip() or None
 
+# Background lead distribution: set to false on staging so only production (main) runs the periodic refresh
+ENABLE_BACKGROUND_DISTRIBUTION = os.getenv("ENABLE_BACKGROUND_DISTRIBUTION", "true").strip().lower() in ("true", "1", "yes")
+
 # Login: when SESSION_SECRET is set and at least one auth method is configured, dashboard requires login
 SESSION_SECRET = os.getenv("SESSION_SECRET", "").strip() or None
 # Password login: bcrypt hash (generate with: python -c "import bcrypt; print(bcrypt.hashpw(b'yourpassword', bcrypt.gensalt()).decode())")
@@ -73,13 +76,17 @@ REASSIGN_TAG_ATTEMPT_2 = "37295488"
 REASSIGN_TAG_ATTEMPT_3 = "37295491"
 
 # Re-Distribute Leads: unqualified leads by disqualification reason, then re-open
-REDISTRIBUTE_LEAD_PIPELINE_ID = os.getenv("REDISTRIBUTE_LEAD_PIPELINE_ID", "lead-pipeline-id").strip()
-REDISTRIBUTE_UNQUALIFIED_STAGE_ID = os.getenv("REDISTRIBUTE_UNQUALIFIED_STAGE_ID", "unqualified-stage-id").strip()
-REDISTRIBUTE_NEW_STAGE_ID = os.getenv("REDISTRIBUTE_NEW_STAGE_ID", "new-stage-id").strip()
+# Use defaults when env var is missing or empty (e.g. .env not loaded or unset on deploy)
+_def = os.getenv("REDISTRIBUTE_LEAD_PIPELINE_ID", "lead-pipeline-id").strip()
+REDISTRIBUTE_LEAD_PIPELINE_ID = _def or "lead-pipeline-id"
+_def = os.getenv("REDISTRIBUTE_UNQUALIFIED_STAGE_ID", "unqualified-stage-id").strip()
+REDISTRIBUTE_UNQUALIFIED_STAGE_ID = _def or "unqualified-stage-id"
+_def = os.getenv("REDISTRIBUTE_NEW_STAGE_ID", "new-stage-id").strip()
+REDISTRIBUTE_NEW_STAGE_ID = _def or "new-stage-id"
 REDISTRIBUTE_DISQUALIFICATION_PROPERTY = os.getenv("REDISTRIBUTE_DISQUALIFICATION_PROPERTY", "hs_lead_disqualification_reason").strip()
 REDISTRIBUTE_DATE_ENTERED_PROPERTY = os.getenv("REDISTRIBUTE_DATE_ENTERED_PROPERTY", "hs_v2_date_entered_unqualified_stage_id_1675714327").strip()
 REDISTRIBUTE_REASONS = ["Volume", "No Response", "Maybe (wants to think)"]
 REDISTRIBUTE_OPEN_LEAD_STATUS = os.getenv("REDISTRIBUTE_OPEN_LEAD_STATUS", "Open Lead").strip()
 # Staging only: if set, only show leads whose name contains this string (e.g. "TestABC")
 REDISTRIBUTE_STAGING_NAME_CONTAINS = os.getenv("REDISTRIBUTE_STAGING_NAME_CONTAINS", "").strip()
-REDISTRIBUTE_LEAD_NAME_PROPERTY = os.getenv("REDISTRIBUTE_LEAD_NAME_PROPERTY", "hs_name").strip()
+REDISTRIBUTE_LEAD_NAME_PROPERTY = os.getenv("REDISTRIBUTE_LEAD_NAME_PROPERTY", "hs_lead_name").strip()

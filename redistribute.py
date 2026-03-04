@@ -5,12 +5,8 @@ and allow re-opening them (unassign contact, set Open Lead, move lead to new sta
 from __future__ import annotations
 
 import logging
-import time
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
-
-# Max time (seconds) to spend in HubSpot search loop so we respond before frontend 25s timeout
-REDISTRIBUTE_COUNTS_DEADLINE_SECONDS = 22
 
 from hubspot_client import HubSpotClient
 from config import (
@@ -57,7 +53,7 @@ def get_redistribute_counts(
     filters = [
         {"propertyName": "hs_pipeline", "operator": "EQ", "value": REDISTRIBUTE_LEAD_PIPELINE_ID},
         {"propertyName": "hs_pipeline_stage", "operator": "EQ", "value": REDISTRIBUTE_UNQUALIFIED_STAGE_ID},
-        {"propertyName": REDISTRIBUTE_DISQUALIFICATION_PROPERTY, "operator": "IN", "value": REDISTRIBUTE_REASONS},
+        {"propertyName": REDISTRIBUTE_DISQUALIFICATION_PROPERTY, "operator": "IN", "values": REDISTRIBUTE_REASONS},
     ]
     if last_days is not None and last_days > 0:
         since_ms = int((datetime.now(timezone.utc) - timedelta(days=last_days)).timestamp() * 1000)
@@ -67,28 +63,22 @@ def get_redistribute_counts(
             "value": str(since_ms),
         })
     if REDISTRIBUTE_STAGING_NAME_CONTAINS:
+        staging_value = "*" + REDISTRIBUTE_STAGING_NAME_CONTAINS + "*"
         filters.append({
             "propertyName": REDISTRIBUTE_LEAD_NAME_PROPERTY,
             "operator": "CONTAINS_TOKEN",
-            "value": REDISTRIBUTE_STAGING_NAME_CONTAINS,
+            "value": staging_value,
         })
     filter_groups = [{"filters": filters}]
     properties = [REDISTRIBUTE_DISQUALIFICATION_PROPERTY]
     if REDISTRIBUTE_STAGING_NAME_CONTAINS:
         properties.append(REDISTRIBUTE_LEAD_NAME_PROPERTY)
     counts = {r: 0 for r in REDISTRIBUTE_REASONS}
-    # Skip HubSpot call if pipeline/stage are still placeholders (avoids slow or invalid API calls)
-    if REDISTRIBUTE_LEAD_PIPELINE_ID in ("lead-pipeline-id", "") or REDISTRIBUTE_UNQUALIFIED_STAGE_ID in ("unqualified-stage-id", ""):
-        return {"counts": counts, "error": "Configure REDISTRIBUTE_LEAD_PIPELINE_ID and REDISTRIBUTE_UNQUALIFIED_STAGE_ID in environment."}
     try:
         all_results = []
         after = None
         max_pages = 20  # cap at 2000 leads to avoid infinite pagination
-        deadline = time.monotonic() + REDISTRIBUTE_COUNTS_DEADLINE_SECONDS
         for _ in range(max_pages):
-            if time.monotonic() >= deadline:
-                _log.warning("redistribute counts: hit time limit, returning partial counts")
-                break
             res = client.search_leads(
                 filter_groups=filter_groups,
                 properties=properties,
@@ -137,10 +127,11 @@ def execute_redistribute(
             "value": str(since_ms),
         })
     if REDISTRIBUTE_STAGING_NAME_CONTAINS:
+        staging_value = "*" + REDISTRIBUTE_STAGING_NAME_CONTAINS + "*"
         filters.append({
             "propertyName": REDISTRIBUTE_LEAD_NAME_PROPERTY,
             "operator": "CONTAINS_TOKEN",
-            "value": REDISTRIBUTE_STAGING_NAME_CONTAINS,
+            "value": staging_value,
         })
     filter_groups = [{"filters": filters}]
     properties = ["hs_object_id"]

@@ -42,6 +42,15 @@ class HubSpotClient:
                 if e.response is not None and e.response.status_code == 429 and attempt < 3:
                     time.sleep(2.0 ** (attempt + 1))
                     continue
+                if e.response is not None and 400 <= e.response.status_code < 500:
+                    try:
+                        body = e.response.json()
+                        msg = body.get("message") or body.get("error") or str(e)
+                        if isinstance(body.get("errors"), list) and body["errors"]:
+                            msg = body["errors"][0].get("message", msg)
+                    except Exception:
+                        msg = e.response.text or str(e)
+                    raise requests.HTTPError(msg, response=e.response)
                 raise
         if last_error is not None:
             raise last_error

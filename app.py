@@ -44,6 +44,7 @@ from config import (
     SMTP_PASSWORD,
     EMAIL_FROM,
     ALLOWED_EMAILS,
+    ENABLE_BACKGROUND_DISTRIBUTION,
 )
 from hubspot_client import HubSpotClient
 from itsdangerous import URLSafeTimedSerializer
@@ -86,6 +87,13 @@ def _api_500_ensure_json(response):
         except Exception:
             pass
     return response
+
+
+@app.route("/api/ping")
+@app.route("/ping")
+def _ping():
+    """Instant response to verify server is responsive (no DB or HubSpot)."""
+    return jsonify({"ping": "pong", "app": "kinly-lead-distribution"})
 
 
 # Auth: when SESSION_SECRET is set and at least one method (password or email OTP) is configured
@@ -269,7 +277,7 @@ def _require_auth():
         return None
     if path in ("/api/auth/send-code", "/api/auth/verify-code", "/api/auth/methods"):
         return None
-    if path == "/api/health":
+    if path == "/api/health" or path == "/api/ping":
         return None
     if path == "/api/webhooks/lead-team-max-leads":
         return None
@@ -412,6 +420,8 @@ def _get_call_minutes_last_120(client: HubSpotClient, hubspot_owner_id: str):
 @app.route("/api/health")
 def health():
     return jsonify({"ok": True, "hubspot_configured": bool(HUBSPOT_ACCESS_TOKEN)})
+
+
 
 
 # --- Login (when SESSION_SECRET and APP_PASSWORD_HASH are set) ---
@@ -1553,8 +1563,12 @@ def _refresh_loop() -> None:
         time.sleep(REFRESH_INTERVAL_SECONDS)
 
 
-_refresh_thread = threading.Thread(target=_refresh_loop, daemon=True, name="kinly-refresh")
-_refresh_thread.start()
+if ENABLE_BACKGROUND_DISTRIBUTION:
+    _refresh_thread = threading.Thread(target=_refresh_loop, daemon=True, name="kinly-refresh")
+    _refresh_thread.start()
+    _log.info("Background lead distribution enabled (periodic refresh every 6 min)")
+else:
+    _log.info("Background lead distribution disabled (ENABLE_BACKGROUND_DISTRIBUTION=false)")
 
 
 def _cache_warmer_loop() -> None:

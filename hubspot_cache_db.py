@@ -32,7 +32,8 @@ def _get_connection():
         # Railway Postgres may use postgres://; psycopg2 expects no scheme or postgresql://
         if url.startswith("postgres://"):
             url = "postgresql://" + url[11:]
-        conn = psycopg2.connect(url)
+        # Avoid hanging forever if DB is unreachable (e.g. Railway Postgres slow/unreachable)
+        conn = psycopg2.connect(url, connect_timeout=10)
         conn.autocommit = True
         return conn
     except Exception as e:

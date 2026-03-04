@@ -221,8 +221,8 @@
               showError((d && d.error) || "Failed to send code.");
             });
           })
-          .catch(function () {
-            showError("Request failed.");
+          .catch(function (err) {
+            showError(err && err.message ? "There was a problem with the request. " + err.message : "There was a problem with the request. Check your connection and try again.");
           })
           .finally(function () {
             btn.disabled = false;
@@ -250,8 +250,8 @@
               showError((d && d.error) || "Invalid or expired code.");
             });
           })
-          .catch(function () {
-            showError("Verification failed.");
+          .catch(function (err) {
+            showError(err && err.message ? "There was a problem with the request. " + err.message : "Verification failed. Check your connection and try again.");
           })
           .finally(function () {
             btn.disabled = false;
