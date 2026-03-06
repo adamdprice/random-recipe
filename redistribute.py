@@ -5,8 +5,16 @@ and allow re-opening them (unassign contact, set Open Lead, move lead to new sta
 from __future__ import annotations
 
 import logging
+import time
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
+
+# Rate-limit safeguarding: batch association fetches and throttle patch calls
+ASSOCIATION_BATCH_SIZE = 100
+SLEEP_BETWEEN_ASSOCIATION_BATCHES_SEC = 1.0
+PATCH_DELAY_EVERY_N_LEADS = 10
+PATCH_DELAY_SEC = 0.25
+PATCH_429_RETRY_SLEEP_SEC = 5.0
 
 from hubspot_client import HubSpotClient
 from config import (
@@ -176,12 +184,35 @@ def execute_redistribute(
         return {"redistributed": 0, "errors": [], "lead_ids": [], "error": str(e)}
     if not all_lead_ids:
         return {"redistributed": 0, "errors": [], "lead_ids": []}
-    assoc = client.get_lead_to_contact_associations_batch(all_lead_ids)
+    # Fetch associations in chunks to avoid rate limits; merge results
+    assoc: dict[str, list[str]] = {}
+    for i in range(0, len(all_lead_ids), ASSOCIATION_BATCH_SIZE):
+        chunk = all_lead_ids[i : i + ASSOCIATION_BATCH_SIZE]
+        if chunk:
+            chunk_assoc = client.get_lead_to_contact_associations_batch(chunk)
+            for lid, cids in (chunk_assoc or {}).items():
+                if cids and lid not in assoc:
+                    assoc[lid] = list(cids)
+            if i + ASSOCIATION_BATCH_SIZE < len(all_lead_ids):
+                time.sleep(SLEEP_BETWEEN_ASSOCIATION_BATCHES_SEC)
+    # Re-fetch associations for leads that had none (in case first batch was throttled)
+    missing = [lid for lid in all_lead_ids if not assoc.get(lid)]
+    if missing:
+        for i in range(0, len(missing), ASSOCIATION_BATCH_SIZE):
+            chunk = missing[i : i + ASSOCIATION_BATCH_SIZE]
+            chunk_assoc = client.get_lead_to_contact_associations_batch(chunk)
+            for lid, cids in (chunk_assoc or {}).items():
+                if cids and lid not in assoc:
+                    assoc[lid] = list(cids)
+            if i + ASSOCIATION_BATCH_SIZE < len(missing):
+                time.sleep(SLEEP_BETWEEN_ASSOCIATION_BATCHES_SEC)
     errors = []
     redistributed = 0
     lead_ids_done: list[str] = []
     _TARGET_CID = "691929662686"
-    for lead_id in all_lead_ids:
+    for idx, lead_id in enumerate(all_lead_ids):
+        if idx > 0 and idx % PATCH_DELAY_EVERY_N_LEADS == 0:
+            time.sleep(PATCH_DELAY_SEC)
         contact_ids = assoc.get(lead_id) or []
         contact_id = contact_ids[0] if contact_ids else None
         # #region agent log
@@ -207,7 +238,27 @@ def execute_redistribute(
             redistributed += 1
             lead_ids_done.append(lead_id)
         except Exception as e:
-            errors.append({"lead_id": lead_id, "message": str(e)})
+            err_msg = str(e)
+            if "429" in err_msg or "Too Many Requests" in err_msg:
+                time.sleep(PATCH_429_RETRY_SLEEP_SEC)
+                try:
+                    if contact_id:
+                        client.patch_contact(contact_id, {
+                            "hubspot_owner_id": "",
+                            "hs_lead_status": REDISTRIBUTE_OPEN_LEAD_STATUS,
+                            "assign_lead": "",
+                        })
+                    client.patch_lead(lead_id, {
+                        "hs_pipeline": REDISTRIBUTE_LEAD_PIPELINE_ID,
+                        "hs_pipeline_stage": REDISTRIBUTE_NEW_STAGE_ID,
+                        REDISTRIBUTE_DISQUALIFICATION_PROPERTY: "",
+                    })
+                    redistributed += 1
+                    lead_ids_done.append(lead_id)
+                except Exception as e2:
+                    errors.append({"lead_id": lead_id, "message": str(e2)})
+            else:
+                errors.append({"lead_id": lead_id, "message": err_msg})
     return {"redistributed": redistributed, "errors": errors, "lead_ids": lead_ids_done}
 
 
@@ -275,7 +326,9 @@ def execute_redistribute_batch(
     redistributed = 0
     lead_ids_done: list[str] = []
     _TARGET_CID = "691929662686"
-    for row in lead_rows:
+    for idx, row in enumerate(lead_rows):
+        if idx > 0 and idx % PATCH_DELAY_EVERY_N_LEADS == 0:
+            time.sleep(PATCH_DELAY_SEC)
         lead_id = (row.get("lead_id") or "").strip()
         contact_id = (row.get("contact_id") or "").strip() or None
         if not lead_id:
@@ -303,5 +356,25 @@ def execute_redistribute_batch(
             redistributed += 1
             lead_ids_done.append(lead_id)
         except Exception as e:
-            errors.append({"lead_id": lead_id, "message": str(e)})
+            err_msg = str(e)
+            if "429" in err_msg or "Too Many Requests" in err_msg:
+                time.sleep(PATCH_429_RETRY_SLEEP_SEC)
+                try:
+                    if contact_id:
+                        client.patch_contact(contact_id, {
+                            "hubspot_owner_id": "",
+                            "hs_lead_status": REDISTRIBUTE_OPEN_LEAD_STATUS,
+                            "assign_lead": "",
+                        })
+                    client.patch_lead(lead_id, {
+                        "hs_pipeline": REDISTRIBUTE_LEAD_PIPELINE_ID,
+                        "hs_pipeline_stage": REDISTRIBUTE_NEW_STAGE_ID,
+                        REDISTRIBUTE_DISQUALIFICATION_PROPERTY: "",
+                    })
+                    redistributed += 1
+                    lead_ids_done.append(lead_id)
+                except Exception as e2:
+                    errors.append({"lead_id": lead_id, "message": str(e2)})
+            else:
+                errors.append({"lead_id": lead_id, "message": err_msg})
     return {"redistributed": redistributed, "errors": errors, "lead_ids": lead_ids_done}
