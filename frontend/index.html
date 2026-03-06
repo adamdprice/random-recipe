@@ -188,6 +188,25 @@
     </section>
 
     <section id="redistribute" class="panel" hidden>
+      <div class="card section redistribute-single-lead-card">
+        <div class="section-head">
+          <h2>Re-distribute a single lead</h2>
+          <span class="squiggle" aria-hidden="true"></span>
+        </div>
+        <p class="hint">Enter a lead record ID to look up the lead, then confirm to re-distribute (contact owner cleared, lead moved to new stage).</p>
+        <div class="redistribute-single-lead-form">
+          <label for="redistribute-single-lead-id">Lead record ID</label>
+          <input type="text" id="redistribute-single-lead-id" class="redistribute-single-lead-input" placeholder="e.g. 123456789" aria-label="Lead record ID" />
+          <button type="button" id="redistribute-single-lookup-btn" class="btn btn-secondary">Look up</button>
+        </div>
+        <div id="redistribute-single-loading" class="loading" hidden>Looking up…</div>
+        <div id="redistribute-single-error" class="error" hidden></div>
+        <div id="redistribute-single-confirm-wrap" class="redistribute-single-confirm-wrap" hidden>
+          <p id="redistribute-single-lead-name" class="redistribute-single-lead-name"></p>
+          <p class="hint">Re-distribute this lead? This will clear the contact owner, set lead status to Open Lead, and move the lead to the new stage.</p>
+          <button type="button" id="redistribute-single-execute-btn" class="btn">Confirm and re-distribute</button>
+        </div>
+      </div>
       <div class="card section">
         <div class="section-head">
           <h2>Re-Distribute Leads</h2>

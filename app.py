@@ -1647,6 +1647,46 @@ def api_redistribute_execute():
         return jsonify({"redistributed": 0, "errors": [], "error": str(e)}), 500
 
 
+@app.route("/api/redistribute/lead-lookup", methods=["GET"])
+def api_redistribute_lead_lookup():
+    """GET ?lead_id=... Returns { lead_id, lead_name, contact_id?, error? } for single-lead re-distribute confirmation."""
+    lead_id = (request.args.get("lead_id") or "").strip()
+    if not lead_id:
+        return jsonify({"lead_id": "", "lead_name": "", "contact_id": None, "error": "lead_id is required"}), 400
+    try:
+        from redistribute import lookup_lead_for_redistribute
+        client = get_client()
+        out = lookup_lead_for_redistribute(client, lead_id)
+        if out.get("error"):
+            return jsonify(out), 400
+        return jsonify(out)
+    except Exception as e:
+        _log.exception("redistribute lead-lookup failed")
+        return _safe_json_response({"lead_id": lead_id, "lead_name": "", "contact_id": None, "error": str(e)}, 500)
+
+
+@app.route("/api/redistribute/execute-one", methods=["POST"])
+def api_redistribute_execute_one():
+    """POST { lead_id }. Re-distribute a single lead (contact owner cleared, lead moved to new stage)."""
+    data = request.get_json(silent=True) or {}
+    lead_id = (data.get("lead_id") or "").strip()
+    if not lead_id:
+        return jsonify({"success": False, "error": "lead_id is required", "contact_updated": False, "lead_updated": False}), 400
+    try:
+        from redistribute import execute_single_lead_redistribute
+        client = get_client()
+        result = execute_single_lead_redistribute(client, lead_id)
+        if result.get("success") and _redistribute_remove_lead_ids_from_cache:
+            _redistribute_remove_lead_ids_from_cache([lead_id])
+        if result.get("success"):
+            _log_activity("redistribute_one", f"Re-distributed single lead {lead_id}", {"lead_id": lead_id})
+        status = 200 if result.get("success") else 400
+        return jsonify(result), status
+    except Exception as e:
+        _log.exception("redistribute execute-one failed")
+        return _safe_json_response({"success": False, "error": str(e), "contact_updated": False, "lead_updated": False}, 500)
+
+
 # 500 error handler returns same JSON fallback (body defined at top)
 @app.errorhandler(500)
 def api_500_json(e):

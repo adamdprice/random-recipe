@@ -2826,6 +2826,74 @@
       });
     }
   })();
+
+  (function redistributeSingleLead() {
+    var inputEl = document.getElementById('redistribute-single-lead-id');
+    var lookupBtn = document.getElementById('redistribute-single-lookup-btn');
+    var loadingEl = document.getElementById('redistribute-single-loading');
+    var errorEl = document.getElementById('redistribute-single-error');
+    var confirmWrap = document.getElementById('redistribute-single-confirm-wrap');
+    var nameEl = document.getElementById('redistribute-single-lead-name');
+    var executeBtn = document.getElementById('redistribute-single-execute-btn');
+    if (!inputEl || !lookupBtn || !confirmWrap || !nameEl || !executeBtn) return;
+    var lastLookupLeadId = null;
+    lookupBtn.addEventListener('click', function () {
+      var leadId = (inputEl.value || '').trim();
+      if (!leadId) {
+        if (errorEl) { errorEl.textContent = 'Enter a lead record ID.'; errorEl.hidden = false; }
+        confirmWrap.hidden = true;
+        return;
+      }
+      if (loadingEl) { loadingEl.hidden = false; loadingEl.textContent = 'Looking up…'; }
+      if (errorEl) errorEl.hidden = true;
+      confirmWrap.hidden = true;
+      fetch(API + '/redistribute/lead-lookup?lead_id=' + encodeURIComponent(leadId))
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+          if (loadingEl) loadingEl.hidden = true;
+          if (data.error) {
+            if (errorEl) { errorEl.textContent = data.error; errorEl.hidden = false; }
+            return;
+          }
+          lastLookupLeadId = data.lead_id;
+          nameEl.textContent = 'Lead: ' + (data.lead_name || ('ID ' + data.lead_id));
+          if (errorEl) errorEl.hidden = true;
+          confirmWrap.hidden = false;
+        })
+        .catch(function (err) {
+          if (loadingEl) loadingEl.hidden = true;
+          if (errorEl) { errorEl.textContent = (err && err.message) || 'Lookup failed.'; errorEl.hidden = false; }
+        });
+    });
+    executeBtn.addEventListener('click', function () {
+      if (!lastLookupLeadId) return;
+      if (!confirm('Re-distribute this lead? This will clear the contact owner, set lead status to Open Lead, and move the lead to the new stage.')) return;
+      executeBtn.disabled = true;
+      fetch(API + '/redistribute/execute-one', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ lead_id: lastLookupLeadId })
+      })
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+          executeBtn.disabled = false;
+          if (data.success) {
+            confirmWrap.hidden = true;
+            lastLookupLeadId = null;
+            if (inputEl) inputEl.value = '';
+            alert('Lead re-distributed. Contact ' + (data.contact_updated ? 'was' : 'was not') + ' updated; lead moved to new stage.');
+            loadRedistributeTab();
+          } else {
+            alert(data.error || 'Re-distribute failed.');
+          }
+        })
+        .catch(function (err) {
+          executeBtn.disabled = false;
+          alert((err && err.message) || 'Request failed.');
+        });
+    });
+  })();
+
   // Global fallback: after 90s replace Staff/Unallocated "Loading…" with timeout (redistribute tab has no limit)
   setTimeout(function () {
     var ids = ['staff-loading', 'unallocated-gauges-loading'];

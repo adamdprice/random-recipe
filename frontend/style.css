@@ -757,6 +757,44 @@ code {
   margin-top: 0;
 }
 
+.redistribute-single-lead-card {
+  margin-bottom: 1.5rem;
+}
+
+.redistribute-single-lead-form {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.5rem;
+}
+
+.redistribute-single-lead-form label {
+  font-weight: 500;
+  color: var(--text);
+}
+
+.redistribute-single-lead-input {
+  min-width: 12rem;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 1rem;
+  box-sizing: border-box;
+}
+
+.redistribute-single-confirm-wrap {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border);
+}
+
+.redistribute-single-lead-name {
+  font-weight: 600;
+  color: var(--text);
+  margin: 0 0 0.5rem 0;
+}
+
 .table input[type="number"],
 .table select {
   padding: 0.4rem 0.6rem;

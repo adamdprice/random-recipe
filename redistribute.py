@@ -17,6 +17,7 @@ from config import (
     REDISTRIBUTE_DATE_ENTERED_PROPERTY,
     REDISTRIBUTE_REASONS,
     REDISTRIBUTE_OPEN_LEAD_STATUS,
+    REDISTRIBUTE_LEAD_NAME_PROPERTY,
 )
 
 _log = logging.getLogger(__name__)
@@ -179,9 +180,18 @@ def execute_redistribute(
     errors = []
     redistributed = 0
     lead_ids_done: list[str] = []
+    _TARGET_CID = "691929662686"
     for lead_id in all_lead_ids:
         contact_ids = assoc.get(lead_id) or []
         contact_id = contact_ids[0] if contact_ids else None
+        # #region agent log
+        try:
+            import json
+            with open("/Users/tga/Cursor/.cursor/debug-f32963.log", "a") as _f:
+                _f.write(json.dumps({"sessionId": "f32963", "location": "redistribute.py:execute_redistribute", "message": "live path per-lead", "data": {"lead_id": lead_id, "contact_id": contact_id, "num_contacts": len(contact_ids), "target_in_list": _TARGET_CID in contact_ids, "using_target": contact_id == _TARGET_CID}, "hypothesisId": "A", "timestamp": __import__("time").time() * 1000}) + "\n")
+        except Exception:
+            pass
+        # #endregion
         try:
             if contact_id:
                 client.patch_contact(contact_id, {
@@ -201,6 +211,56 @@ def execute_redistribute(
     return {"redistributed": redistributed, "errors": errors, "lead_ids": lead_ids_done}
 
 
+def lookup_lead_for_redistribute(client: HubSpotClient, lead_id: str) -> dict:
+    """
+    Fetch a lead by ID for single-lead re-distribute confirmation.
+    Returns { "lead_id": str, "lead_name": str, "contact_id": str | None, "error": str | None }.
+    """
+    lead_id = (lead_id or "").strip()
+    if not lead_id:
+        return {"lead_id": "", "lead_name": "", "contact_id": None, "error": "Lead ID is required"}
+    try:
+        lead = client.get_lead(lead_id, properties=[REDISTRIBUTE_LEAD_NAME_PROPERTY, "hs_pipeline", "hs_pipeline_stage"])
+    except Exception as e:
+        _log.exception("lookup_lead_for_redistribute get_lead failed")
+        return {"lead_id": lead_id, "lead_name": "", "contact_id": None, "error": str(e)}
+    props = lead.get("properties") or {}
+    name = _str(_prop_value(props, REDISTRIBUTE_LEAD_NAME_PROPERTY)) or f"Lead {lead_id}"
+    assoc = client.get_lead_to_contact_associations_batch([lead_id])
+    contact_ids = assoc.get(lead_id) or []
+    contact_id = str(contact_ids[0]) if contact_ids else None
+    return {"lead_id": lead_id, "lead_name": name, "contact_id": contact_id, "error": None}
+
+
+def execute_single_lead_redistribute(client: HubSpotClient, lead_id: str) -> dict:
+    """
+    Re-distribute a single lead: clear contact owner + set status, move lead to new stage, clear reason.
+    Returns { "success": bool, "error": str | None, "contact_updated": bool, "lead_updated": bool }.
+    """
+    lead_id = (lead_id or "").strip()
+    if not lead_id:
+        return {"success": False, "error": "Lead ID is required", "contact_updated": False, "lead_updated": False}
+    try:
+        assoc = client.get_lead_to_contact_associations_batch([lead_id])
+        contact_ids = assoc.get(lead_id) or []
+        contact_id = str(contact_ids[0]) if contact_ids else None
+        if contact_id:
+            client.patch_contact(contact_id, {
+                "hubspot_owner_id": "",
+                "hs_lead_status": REDISTRIBUTE_OPEN_LEAD_STATUS,
+                "assign_lead": "",
+            })
+        client.patch_lead(lead_id, {
+            "hs_pipeline": REDISTRIBUTE_LEAD_PIPELINE_ID,
+            "hs_pipeline_stage": REDISTRIBUTE_NEW_STAGE_ID,
+            REDISTRIBUTE_DISQUALIFICATION_PROPERTY: "",
+        })
+        return {"success": True, "error": None, "contact_updated": bool(contact_id), "lead_updated": True}
+    except Exception as e:
+        _log.exception("execute_single_lead_redistribute failed")
+        return {"success": False, "error": str(e), "contact_updated": False, "lead_updated": False}
+
+
 def execute_redistribute_batch(
     client: HubSpotClient,
     lead_rows: list[dict],
@@ -214,11 +274,20 @@ def execute_redistribute_batch(
     errors = []
     redistributed = 0
     lead_ids_done: list[str] = []
+    _TARGET_CID = "691929662686"
     for row in lead_rows:
         lead_id = (row.get("lead_id") or "").strip()
         contact_id = (row.get("contact_id") or "").strip() or None
         if not lead_id:
             continue
+        # #region agent log
+        try:
+            import json
+            with open("/Users/tga/Cursor/.cursor/debug-f32963.log", "a") as _f:
+                _f.write(json.dumps({"sessionId": "f32963", "location": "redistribute.py:execute_redistribute_batch", "message": "cache path per-row", "data": {"lead_id": lead_id, "contact_id": contact_id, "is_target_contact": contact_id == _TARGET_CID}, "hypothesisId": "B", "timestamp": __import__("time").time() * 1000}) + "\n")
+        except Exception:
+            pass
+        # #endregion
         try:
             if contact_id:
                 client.patch_contact(contact_id, {
