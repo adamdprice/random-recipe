@@ -2694,7 +2694,7 @@
       if (teamsContainer) teamsContainer.innerHTML = '';
       if (errorEl) { errorEl.hidden = true; errorEl.textContent = ''; }
       if (loadingEl) loadingEl.hidden = false;
-      fetch(API + '/owners')
+      fetch(API + '/owners?refresh=1')
         .then(function (r) { return r.json(); })
         .then(function (data) {
           if (loadingEl) loadingEl.hidden = true;
