@@ -2,6 +2,8 @@
   const API = '/api';
   var staffCache = [];
   var lastPauseLeadsOptions = [];
+  // After create-staff, refetch can return before HubSpot has the new record; we merge them in if missing
+  var _pendingCreatedStaff = null;
 
   // Timeout for Staff Management / main dashboard only (redistribute tab has no timeout)
   var FETCH_TIMEOUT_MS = 90000;
@@ -361,7 +363,13 @@
     if (loadingEl) loadingEl.hidden = false;
     if (container) container.innerHTML = '';
     fetch(API + '/staff').then(parseJsonResponse).then(function (data) {
-      if (data.staff) staffCache = data.staff;
+      if (data.staff) {
+        var list = data.staff;
+        if (_pendingCreatedStaff && !list.some(function (s) { return String(s.id) === String(_pendingCreatedStaff.id); })) {
+          list = list.concat([_pendingCreatedStaff]);
+        }
+        staffCache = list;
+      }
       renderCallActivityChart(staffCache || []);
     }).catch(function (e) {
       if (container) container.innerHTML = '<p class="error">' + (e.message || 'Failed to load').replace(/</g, '&lt;') + '</p>';
@@ -1797,7 +1805,16 @@
           errEl.hidden = false;
           return;
         }
-        const staff = data.staff || [];
+        var staff = data.staff || [];
+        if (_pendingCreatedStaff && !staff.some(function (s) { return String(s.id) === String(_pendingCreatedStaff.id); })) {
+          // #region agent log
+          fetch('http://127.0.0.1:7638/ingest/f22f2c81-3fba-4e68-93e8-8b0856a07e0a',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'f32963'},body:JSON.stringify({sessionId:'f32963',location:'app.js:staffTable_then',message:'refetch_omitted_new_staff_merged',data:{listLen:staff.length,pendingId:_pendingCreatedStaff.id},timestamp:Date.now(),hypothesisId:'H1'})}).catch(function(){});
+          // #endregion
+          staff = staff.concat([_pendingCreatedStaff]);
+          _pendingCreatedStaff = null;
+        } else if (_pendingCreatedStaff) {
+          _pendingCreatedStaff = null;
+        }
         staffCache = staff;
         lastPauseLeadsOptions = optionsData.options || [];
         const pauseLeadsOptions = lastPauseLeadsOptions;
@@ -2117,7 +2134,11 @@
           if (emptyEl) emptyEl.hidden = true;
           return;
         }
-        staffCache = staffData.staff || [];
+        var list = staffData.staff || [];
+        if (_pendingCreatedStaff && !list.some(function (s) { return String(s.id) === String(_pendingCreatedStaff.id); })) {
+          list = list.concat([_pendingCreatedStaff]);
+        }
+        staffCache = list;
         staffForSelect = dedupeAndSortStaff(staffCache);
         holidaysCache = holidaysData.holidays || [];
         if (viewsEl) viewsEl.hidden = false;
@@ -2778,6 +2799,10 @@
               staffCache.push(newStaff);
               renderStaffTableFromCache();
               closeModal();
+              _pendingCreatedStaff = newStaff;
+              // #region agent log
+              fetch('http://127.0.0.1:7638/ingest/f22f2c81-3fba-4e68-93e8-8b0856a07e0a',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'f32963'},body:JSON.stringify({sessionId:'f32963',location:'app.js:create_staff_success',message:'create_staff_success',data:{newStaffId:newStaff.id},timestamp:Date.now(),hypothesisId:'H1'})}).catch(function(){});
+              // #endregion
               staffTable(true);
               if (res.data.lead_teams_warning) {
                 alert('Staff member created, but lead teams could not be saved. Please edit the staff member to assign teams.\n\n' + res.data.lead_teams_warning);
