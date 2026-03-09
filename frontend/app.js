@@ -2777,8 +2777,9 @@
           });
           availableOwners = owners.filter(function (o) {
             var id = o.id != null ? String(o.id) : '';
-            var hasName = !!((o.firstName || '').trim() || (o.lastName || '').trim());
-            return id && !existingOwnerIds[id] && hasName;
+            var first = (o.firstName || '').trim();
+            var last = (o.lastName || '').trim();
+            return id && !existingOwnerIds[id] && (!!first || !!last);
           });
           availableOwners.sort(function (a, b) {
             var hasNameA = !!(a.firstName || a.lastName);

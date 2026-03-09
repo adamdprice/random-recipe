@@ -1124,21 +1124,24 @@ def create_staff():
         owners = client.get_owners()
         first_name = ""
         last_name = ""
+        owner_found = False
         for o in (owners or []):
             if str(o.get("id")) == str(owner_id):
                 first_name = (o.get("firstName") or "").strip()
                 last_name = (o.get("lastName") or "").strip()
+                owner_found = True
                 break
         name = " ".join([first_name, last_name]).strip() or str(owner_id)
-        # Reject if no real name (regardless of reason: invite not accepted, or missing in HubSpot)
+        no_name_msg = "This user has no name in HubSpot and cannot be added as staff. Add a name in HubSpot or choose another user."
+        if not owner_found:
+            return jsonify({"error": no_name_msg}), 400
         if not first_name and not last_name:
-            return jsonify({
-                "error": "This user has no name in HubSpot and cannot be added as staff. Add a name in HubSpot or choose another user."
-            }), 400
+            return jsonify({"error": no_name_msg}), 400
         if not name or name.strip() == str(owner_id):
-            return jsonify({
-                "error": "This user has no name in HubSpot and cannot be added as staff. Add a name in HubSpot or choose another user."
-            }), 400
+            return jsonify({"error": no_name_msg}), 400
+        # Reject if "name" is only digits (same as owner id used as display name)
+        if name.strip().isdigit() and name.strip() == str(owner_id).strip():
+            return jsonify({"error": no_name_msg}), 400
         # Create Staff custom object: availability Unavailable, optional teams
         props = {
             "hubspot_owner_id": str(owner_id),
