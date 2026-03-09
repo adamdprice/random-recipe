@@ -2,8 +2,44 @@
   const API = '/api';
   var staffCache = [];
   var lastPauseLeadsOptions = [];
-  // After create-staff, refetch can return before HubSpot has the new record; we merge them in if missing
+  // After create-staff, refetch can return before HubSpot has the new record; we merge them in if missing.
+  // Kept in sessionStorage too so a full page reload within 2 min still merges the new staff.
   var _pendingCreatedStaff = null;
+  var PENDING_STAFF_KEY = 'kinly_pending_staff';
+  var PENDING_STAFF_TTL_MS = 2 * 60 * 1000;
+
+  function getPendingCreatedStaff() {
+    if (_pendingCreatedStaff) return _pendingCreatedStaff;
+    try {
+      var raw = sessionStorage.getItem(PENDING_STAFF_KEY);
+      if (!raw) return null;
+      var payload = JSON.parse(raw);
+      if (!payload || !payload.staff || (payload.until && Date.now() > payload.until)) {
+        sessionStorage.removeItem(PENDING_STAFF_KEY);
+        return null;
+      }
+      return payload.staff;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function setPendingCreatedStaff(staff) {
+    _pendingCreatedStaff = staff;
+    try {
+      sessionStorage.setItem(PENDING_STAFF_KEY, JSON.stringify({
+        staff: staff,
+        until: Date.now() + PENDING_STAFF_TTL_MS
+      }));
+    } catch (e) {}
+  }
+
+  function clearPendingCreatedStaff() {
+    _pendingCreatedStaff = null;
+    try {
+      sessionStorage.removeItem(PENDING_STAFF_KEY);
+    } catch (e) {}
+  }
 
   // Timeout for Staff Management / main dashboard only (redistribute tab has no timeout)
   var FETCH_TIMEOUT_MS = 90000;
@@ -365,10 +401,9 @@
     fetch(API + '/staff').then(parseJsonResponse).then(function (data) {
       if (data.staff) {
         var list = data.staff;
-        if (_pendingCreatedStaff && !list.some(function (s) { return String(s.id) === String(_pendingCreatedStaff.id); })) {
-          list = list.concat([_pendingCreatedStaff]);
-        } else if (_pendingCreatedStaff && list.some(function (s) { return String(s.id) === String(_pendingCreatedStaff.id); })) {
-          _pendingCreatedStaff = null;
+        var pending = getPendingCreatedStaff();
+        if (pending && !list.some(function (s) { return String(s.id) === String(pending.id); })) {
+          list = list.concat([pending]);
         }
         staffCache = list;
       }
@@ -1808,13 +1843,12 @@
           return;
         }
         var staff = data.staff || [];
-        if (_pendingCreatedStaff && !staff.some(function (s) { return String(s.id) === String(_pendingCreatedStaff.id); })) {
+        var pending = getPendingCreatedStaff();
+        if (pending && !staff.some(function (s) { return String(s.id) === String(pending.id); })) {
           // #region agent log
-          fetch('http://127.0.0.1:7638/ingest/f22f2c81-3fba-4e68-93e8-8b0856a07e0a',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'f32963'},body:JSON.stringify({sessionId:'f32963',location:'app.js:staffTable_then',message:'refetch_omitted_new_staff_merged',data:{listLen:staff.length,pendingId:_pendingCreatedStaff.id},timestamp:Date.now(),hypothesisId:'H1'})}).catch(function(){});
+          fetch('http://127.0.0.1:7638/ingest/f22f2c81-3fba-4e68-93e8-8b0856a07e0a',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'f32963'},body:JSON.stringify({sessionId:'f32963',location:'app.js:staffTable_then',message:'refetch_omitted_new_staff_merged',data:{listLen:staff.length,pendingId:pending.id},timestamp:Date.now(),hypothesisId:'H1'})}).catch(function(){});
           // #endregion
-          staff = staff.concat([_pendingCreatedStaff]);
-        } else if (_pendingCreatedStaff && staff.some(function (s) { return String(s.id) === String(_pendingCreatedStaff.id); })) {
-          _pendingCreatedStaff = null;
+          staff = staff.concat([pending]);
         }
         staffCache = staff;
         lastPauseLeadsOptions = optionsData.options || [];
@@ -2136,10 +2170,9 @@
           return;
         }
         var list = staffData.staff || [];
-        if (_pendingCreatedStaff && !list.some(function (s) { return String(s.id) === String(_pendingCreatedStaff.id); })) {
-          list = list.concat([_pendingCreatedStaff]);
-        } else if (_pendingCreatedStaff && list.some(function (s) { return String(s.id) === String(_pendingCreatedStaff.id); })) {
-          _pendingCreatedStaff = null;
+        var pending = getPendingCreatedStaff();
+        if (pending && !list.some(function (s) { return String(s.id) === String(pending.id); })) {
+          list = list.concat([pending]);
         }
         staffCache = list;
         staffForSelect = dedupeAndSortStaff(staffCache);
@@ -2802,12 +2835,13 @@
               staffCache.push(newStaff);
               renderStaffTableFromCache();
               closeModal();
-              _pendingCreatedStaff = newStaff;
-              setTimeout(function () { _pendingCreatedStaff = null; }, 2 * 60 * 1000);
+              setPendingCreatedStaff(newStaff);
+              setTimeout(clearPendingCreatedStaff, PENDING_STAFF_TTL_MS);
               // #region agent log
               fetch('http://127.0.0.1:7638/ingest/f22f2c81-3fba-4e68-93e8-8b0856a07e0a',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'f32963'},body:JSON.stringify({sessionId:'f32963',location:'app.js:create_staff_success',message:'create_staff_success',data:{newStaffId:newStaff.id},timestamp:Date.now(),hypothesisId:'H1'})}).catch(function(){});
               // #endregion
-              staffTable(true);
+              // Delay refetch 60s so the list is not overwritten immediately (avoids race with HubSpot/cache)
+              setTimeout(function () { staffTable(true); }, 60 * 1000);
               if (res.data.lead_teams_warning) {
                 alert('Staff member created, but lead teams could not be saved. Please edit the staff member to assign teams.\n\n' + res.data.lead_teams_warning);
               }
