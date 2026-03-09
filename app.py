@@ -336,6 +336,12 @@ _activity_lock = threading.Lock()
 _refresh_in_progress = False
 _refresh_lock = threading.Lock()
 
+# After create_staff(), any list_staff() that writes to cache must include the new staff for 2 min
+# (HubSpot search can lag; we avoid caching a list that omits the just-created staff)
+_staff_created_cooldown = None
+_staff_cooldown_lock = threading.Lock()
+STAFF_CREATED_COOLDOWN_SECONDS = 120
+
 
 def _log_activity(event: str, message: str, details: Optional[dict] = None) -> None:
     """Append an entry to the activity log (thread-safe)."""
@@ -1052,6 +1058,14 @@ def list_staff():
                 "staff": [],
             }, 503)
         out = result_holder[0]
+        # If we recently created a staff, ensure they're in the list before writing to cache
+        with _staff_cooldown_lock:
+            cd = _staff_created_cooldown
+        if cd and time.time() < cd["until"]:
+            new_one = cd.get("staff")
+            staff_list = out.get("staff") or []
+            if new_one and not any(str(s.get("id")) == str(new_one.get("id")) for s in staff_list):
+                out = {"staff": staff_list + [new_one]}
         _hubspot_cache_set("staff", out)
         return jsonify(out)
     except Exception as e:
@@ -1083,6 +1097,7 @@ def create_staff():
     Body: { "hubspot_owner_id": "<owner_id>", "lead_teams": ["Inbound Lead Team", ...] or "Inbound Lead Team;PIP Lead Team" }.
     Returns the created staff (same shape as list_staff items) so the UI can add without refresh.
     """
+    global _staff_created_cooldown
     from config import HUBSPOT_STAFF_OBJECT_ID
     data = request.get_json() or {}
     owner_id = (data.get("hubspot_owner_id") or "").strip()
@@ -1163,6 +1178,11 @@ def create_staff():
             "on_holiday_today": False,
             "call_minutes_last_120": 0,
         }
+        with _staff_cooldown_lock:
+            _staff_created_cooldown = {
+                "staff": new_staff,
+                "until": time.time() + STAFF_CREATED_COOLDOWN_SECONDS,
+            }
         _hubspot_cache_invalidate("staff", "lead_teams")
         out = {"staff": new_staff}
         if lead_teams_warning:
