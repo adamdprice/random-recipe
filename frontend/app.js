@@ -367,6 +367,8 @@
         var list = data.staff;
         if (_pendingCreatedStaff && !list.some(function (s) { return String(s.id) === String(_pendingCreatedStaff.id); })) {
           list = list.concat([_pendingCreatedStaff]);
+        } else if (_pendingCreatedStaff && list.some(function (s) { return String(s.id) === String(_pendingCreatedStaff.id); })) {
+          _pendingCreatedStaff = null;
         }
         staffCache = list;
       }
@@ -1811,8 +1813,7 @@
           fetch('http://127.0.0.1:7638/ingest/f22f2c81-3fba-4e68-93e8-8b0856a07e0a',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'f32963'},body:JSON.stringify({sessionId:'f32963',location:'app.js:staffTable_then',message:'refetch_omitted_new_staff_merged',data:{listLen:staff.length,pendingId:_pendingCreatedStaff.id},timestamp:Date.now(),hypothesisId:'H1'})}).catch(function(){});
           // #endregion
           staff = staff.concat([_pendingCreatedStaff]);
-          _pendingCreatedStaff = null;
-        } else if (_pendingCreatedStaff) {
+        } else if (_pendingCreatedStaff && staff.some(function (s) { return String(s.id) === String(_pendingCreatedStaff.id); })) {
           _pendingCreatedStaff = null;
         }
         staffCache = staff;
@@ -2137,6 +2138,8 @@
         var list = staffData.staff || [];
         if (_pendingCreatedStaff && !list.some(function (s) { return String(s.id) === String(_pendingCreatedStaff.id); })) {
           list = list.concat([_pendingCreatedStaff]);
+        } else if (_pendingCreatedStaff && list.some(function (s) { return String(s.id) === String(_pendingCreatedStaff.id); })) {
+          _pendingCreatedStaff = null;
         }
         staffCache = list;
         staffForSelect = dedupeAndSortStaff(staffCache);
@@ -2800,6 +2803,7 @@
               renderStaffTableFromCache();
               closeModal();
               _pendingCreatedStaff = newStaff;
+              setTimeout(function () { _pendingCreatedStaff = null; }, 2 * 60 * 1000);
               // #region agent log
               fetch('http://127.0.0.1:7638/ingest/f22f2c81-3fba-4e68-93e8-8b0856a07e0a',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'f32963'},body:JSON.stringify({sessionId:'f32963',location:'app.js:create_staff_success',message:'create_staff_success',data:{newStaffId:newStaff.id},timestamp:Date.now(),hypothesisId:'H1'})}).catch(function(){});
               // #endregion
