@@ -1124,29 +1124,30 @@ def create_staff():
         owners = client.get_owners()
         first_name = ""
         last_name = ""
+        owner_email = ""
         owner_found = False
         for o in (owners or []):
             if str(o.get("id")) == str(owner_id):
                 first_name = (o.get("firstName") or "").strip()
                 last_name = (o.get("lastName") or "").strip()
+                owner_email = (o.get("email") or "").strip()
                 owner_found = True
                 break
         name = " ".join([first_name, last_name]).strip() or str(owner_id)
         no_name_msg = "This user has no name in HubSpot and cannot be added as staff. Add a name in HubSpot or choose another user."
+        no_email_msg = "This user has no proper name in HubSpot (only an email). Add a first and last name in HubSpot or choose another user."
         if not owner_found:
             return jsonify({"error": no_name_msg}), 400
         if not first_name and not last_name:
             return jsonify({"error": no_name_msg}), 400
         if not name or name.strip() == str(owner_id):
             return jsonify({"error": no_name_msg}), 400
-        # Reject if "name" is only digits (same as owner id used as display name)
         if name.strip().isdigit() and name.strip() == str(owner_id).strip():
             return jsonify({"error": no_name_msg}), 400
-        # Reject if name looks like an email (no real name; HubSpot may show email when invite not accepted)
         if "@" in name:
-            return jsonify({
-                "error": "This user has no proper name in HubSpot (only an email). Add a first and last name in HubSpot or choose another user."
-            }), 400
+            return jsonify({"error": no_email_msg}), 400
+        if owner_email and name.strip().lower() == owner_email.lower():
+            return jsonify({"error": no_email_msg}), 400
         # Create Staff custom object: availability Unavailable, optional teams
         props = {
             "hubspot_owner_id": str(owner_id),
