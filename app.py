@@ -1120,7 +1120,7 @@ def create_staff():
         existing = client.get_staff_by_owner_id(str(owner_id), HUBSPOT_STAFF_OBJECT_ID, properties=["hubspot_owner_id"])
         if (existing.get("results") or []):
             return jsonify({"error": "This user already has a staff member"}), 400
-        # Resolve owner name
+        # Resolve owner name (users who haven't accepted the HubSpot invite have no first/last name)
         owners = client.get_owners()
         first_name = ""
         last_name = ""
@@ -1130,6 +1130,10 @@ def create_staff():
                 last_name = (o.get("lastName") or "").strip()
                 break
         name = " ".join([first_name, last_name]).strip() or str(owner_id)
+        if not first_name and not last_name:
+            return jsonify({
+                "error": "This user has not accepted their HubSpot invite yet and has no name. They need to accept the invite in HubSpot before they can be added as staff."
+            }), 400
         # Create Staff custom object: availability Unavailable, optional teams
         props = {
             "hubspot_owner_id": str(owner_id),
