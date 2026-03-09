@@ -166,7 +166,10 @@
             resultsEl.hidden = true;
             input.value = '';
             var staffTab = document.querySelector('.tab[data-tab="staff-mgmt"]');
-            if (staffTab) staffTab.click();
+            if (staffTab) {
+              _skipNextStaffTabLoad = true;
+              staffTab.click();
+            }
             setTimeout(function () {
               var card = document.querySelector('.staff-card[data-staff-id="' + id + '"]');
               if (card) {
@@ -214,6 +217,7 @@
     });
   }
 
+  var _skipNextStaffTabLoad = false;
   function tabs() {
     document.querySelectorAll('.tab').forEach(function (btn) {
       btn.addEventListener('click', function () {
@@ -228,7 +232,10 @@
         document.getElementById(tab).hidden = false;
         if (tab === 'data' && typeof activityLog === 'function') activityLog();
         if (tab === 'team-mgmt') leadTeamsTable();
-        if (tab === 'staff-mgmt') renderUnallocatedGauges();
+        if (tab === 'staff-mgmt') {
+          if (!_skipNextStaffTabLoad) renderUnallocatedGauges();
+          _skipNextStaffTabLoad = false;
+        }
         if (tab === 'call-activity') loadCallActivityTab();
         if (tab === 'redistribute') loadRedistributeTab();
       });
@@ -2982,10 +2989,11 @@
   dryRunForm();
   // activityLog() and leadTeamsTable() run when user clicks Data / Team Management tab
 
-  // Auto-refresh lead teams (Unallocated, etc.), gauges, and staff + call activity every 5 minutes
+  // Auto-refresh lead teams (Unallocated, etc.), gauges, and staff + call activity every 5 minutes.
+  // Skip staffTable() for 2 min after a create so we don't overwrite the list before HubSpot/cache has the new person.
   setInterval(function () {
     leadTeamsTable();
-    staffTable();
+    if (!getPendingCreatedStaff()) staffTable();
     renderUnallocatedGauges();
   }, 5 * 60 * 1000);
 })();
