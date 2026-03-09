@@ -2779,7 +2779,9 @@
             var id = o.id != null ? String(o.id) : '';
             var first = (o.firstName || '').trim();
             var last = (o.lastName || '').trim();
-            return id && !existingOwnerIds[id] && (!!first || !!last);
+            var displayName = [o.firstName, o.lastName].filter(Boolean).join(' ') || o.email || id;
+            var nameIsEmail = displayName.indexOf('@') !== -1;
+            return id && !existingOwnerIds[id] && (!!first || !!last) && !nameIsEmail;
           });
           availableOwners.sort(function (a, b) {
             var hasNameA = !!(a.firstName || a.lastName);

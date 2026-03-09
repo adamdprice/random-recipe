@@ -1142,6 +1142,11 @@ def create_staff():
         # Reject if "name" is only digits (same as owner id used as display name)
         if name.strip().isdigit() and name.strip() == str(owner_id).strip():
             return jsonify({"error": no_name_msg}), 400
+        # Reject if name looks like an email (no real name; HubSpot may show email when invite not accepted)
+        if "@" in name:
+            return jsonify({
+                "error": "This user has no proper name in HubSpot (only an email). Add a first and last name in HubSpot or choose another user."
+            }), 400
         # Create Staff custom object: availability Unavailable, optional teams
         props = {
             "hubspot_owner_id": str(owner_id),
