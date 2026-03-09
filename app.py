@@ -1130,9 +1130,14 @@ def create_staff():
                 last_name = (o.get("lastName") or "").strip()
                 break
         name = " ".join([first_name, last_name]).strip() or str(owner_id)
+        # Reject if no real name (regardless of reason: invite not accepted, or missing in HubSpot)
         if not first_name and not last_name:
             return jsonify({
-                "error": "This user has not accepted their HubSpot invite yet and has no name. They need to accept the invite in HubSpot before they can be added as staff."
+                "error": "This user has no name in HubSpot and cannot be added as staff. Add a name in HubSpot or choose another user."
+            }), 400
+        if not name or name.strip() == str(owner_id):
+            return jsonify({
+                "error": "This user has no name in HubSpot and cannot be added as staff. Add a name in HubSpot or choose another user."
             }), 400
         # Create Staff custom object: availability Unavailable, optional teams
         props = {
