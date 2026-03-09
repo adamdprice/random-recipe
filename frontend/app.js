@@ -1764,7 +1764,7 @@
     });
   }
 
-  function staffTable() {
+  function staffTable(forceRefresh) {
     const loading = document.getElementById('staff-loading');
     const errEl = document.getElementById('staff-error');
     const activeSection = document.getElementById('staff-active-section');
@@ -1782,8 +1782,9 @@
       }
     }, 92000);
 
+    var staffUrl = API + '/staff' + (forceRefresh ? '?refresh=1' : '');
     Promise.all([
-      fetchWithTimeout(API + '/staff').then(parseJsonResponse),
+      fetchWithTimeout(staffUrl).then(parseJsonResponse),
       fetchWithTimeout(API + '/staff/field-options/pause_leads').then(parseJsonResponse),
     ])
       .then(function (results) {
@@ -2777,7 +2778,7 @@
               staffCache.push(newStaff);
               renderStaffTableFromCache();
               closeModal();
-              staffTable();
+              staffTable(true);
               if (res.data.lead_teams_warning) {
                 alert('Staff member created, but lead teams could not be saved. Please edit the staff member to assign teams.\n\n' + res.data.lead_teams_warning);
               }
