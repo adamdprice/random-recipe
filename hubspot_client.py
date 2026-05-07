@@ -21,6 +21,9 @@ class HubSpotClient:
             "Content-Type": "application/json",
         })
 
+    # 5xx status codes that are transient and worth retrying
+    _RETRYABLE_5XX = {502, 503, 504}
+
     def _request(
         self,
         method: str,
@@ -39,10 +42,13 @@ class HubSpotClient:
                 return {}
             except requests.HTTPError as e:
                 last_error = e
-                if e.response is not None and e.response.status_code == 429 and attempt < 3:
-                    time.sleep(2.0 ** (attempt + 1))
+                status = e.response.status_code if e.response is not None else None
+                # Retry on rate-limit or transient gateway errors
+                if status in (429, *self._RETRYABLE_5XX) and attempt < 3:
+                    wait = 2.0 ** (attempt + 1)
+                    time.sleep(wait)
                     continue
-                if e.response is not None and 400 <= e.response.status_code < 500:
+                if status is not None and 400 <= status < 500:
                     try:
                         body = e.response.json()
                         msg = body.get("message") or body.get("error") or str(e)
@@ -51,6 +57,12 @@ class HubSpotClient:
                     except Exception:
                         msg = e.response.text or str(e)
                     raise requests.HTTPError(msg, response=e.response)
+                raise
+            except requests.ConnectionError as e:
+                last_error = e
+                if attempt < 3:
+                    time.sleep(2.0 ** (attempt + 1))
+                    continue
                 raise
         if last_error is not None:
             raise last_error
@@ -97,6 +109,7 @@ class HubSpotClient:
         properties: list[str],
         sorts: Optional[list[dict]] = None,
         limit: int = 100,
+        after: Optional[str] = None,
     ) -> dict:
         body = {
             "filterGroups": filter_groups,
@@ -105,7 +118,18 @@ class HubSpotClient:
         }
         if sorts:
             body["sorts"] = sorts
+        if after:
+            body["after"] = after
         return self._request("POST", "/crm/v3/objects/contacts/search", json=body)
+
+    def batch_update_contacts(self, inputs: list[dict]) -> dict:
+        """Batch update contacts. Each input: { "id": str, "properties": dict }.
+        HubSpot limit: 100 per request."""
+        return self._request(
+            "POST",
+            "/crm/v3/objects/contacts/batch/update",
+            json={"inputs": inputs},
+        )
 
     # --- Calls (for temperature gauge: minutes on calls in last N minutes) ---
     def search_calls(
@@ -222,6 +246,7 @@ class HubSpotClient:
         properties: list[str],
         limit: int = 100,
     ) -> dict:
+        object_type_id = object_type_id.strip().strip("/")
         return self._request(
             "POST",
             f"/crm/v3/objects/{object_type_id}/search",

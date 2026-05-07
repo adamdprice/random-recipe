@@ -538,7 +538,8 @@ Kinly Lead Distribution App"""
             return
         except Exception as e:
             _log.warning("SendGrid API send failed (%s), trying SMTP", e)
-    # SMTP fallback
+    # SMTP fallback — use a short timeout so a hung connection doesn't exhaust gunicorn workers
+    _SMTP_TIMEOUT = 10
     import ssl
     import smtplib
     from email.mime.text import MIMEText
@@ -550,12 +551,12 @@ Kinly Lead Distribution App"""
     msg.attach(MIMEText(body, "plain"))
     context = ssl.create_default_context()
     if SMTP_PORT == 465:
-        with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, context=context, timeout=30) as smtp:
+        with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, context=context, timeout=_SMTP_TIMEOUT) as smtp:
             if SMTP_USER and SMTP_PASSWORD:
                 smtp.login(SMTP_USER, SMTP_PASSWORD)
             smtp.sendmail(EMAIL_FROM, [to_email], msg.as_string())
     else:
-        with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=30) as smtp:
+        with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=_SMTP_TIMEOUT) as smtp:
             smtp.starttls(context=context)
             if SMTP_USER and SMTP_PASSWORD:
                 smtp.login(SMTP_USER, SMTP_PASSWORD)
@@ -1822,6 +1823,36 @@ if os.getenv("DATABASE_URL"):
     _redistribute_cache_thread = threading.Thread(target=_redistribute_cache_loop, daemon=True, name="redistribute-cache")
     _redistribute_cache_thread.start()
     _log.info("Redistribute cache refresh started (every 2 hours)" if _redistribute_cache_available else "Redistribute cache disabled (table/DB unavailable)")
+
+
+# ── Referral code sync ────────────────────────────────────────────────────────
+_REFERRAL_CODE_SYNC_INTERVAL_SECONDS = 15 * 60  # 15 minutes
+
+
+def _referral_code_sync_loop() -> None:
+    """Background loop: wait 30 s on startup, then run referral code sync every 15 minutes."""
+    time.sleep(30)
+    while True:
+        try:
+            from referral_code_sync import run_referral_code_sync
+            run_referral_code_sync()
+        except Exception as e:
+            _log.exception("Referral code sync loop error: %s", e)
+        time.sleep(_REFERRAL_CODE_SYNC_INTERVAL_SECONDS)
+
+
+if os.getenv("DATABASE_URL") and HUBSPOT_ACCESS_TOKEN:
+    _referral_sync_thread = threading.Thread(
+        target=_referral_code_sync_loop, daemon=True, name="referral-code-sync"
+    )
+    _referral_sync_thread.start()
+    _log.info("Referral code sync started (runs every 15 min)")
+else:
+    _log.info(
+        "Referral code sync disabled "
+        "(requires DATABASE_URL and HUBSPOT_ACCESS_TOKEN)"
+    )
+
 
 if __name__ == "__main__":
     import os
